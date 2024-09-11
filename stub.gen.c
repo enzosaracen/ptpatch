@@ -1,107 +1,17 @@
 #include <sys/user.h>
 #include <sys/personality.h>
+enum __ptrace_request{PTRACE_TRACEME=0,PTRACE_PEEKTEXT=1,PTRACE_PEEKDATA=2,PTRACE_PEEKUSER=3,PTRACE_POKETEXT=4,PTRACE_POKEDATA=5,PTRACE_POKEUSER=6,PTRACE_CONT=7,PTRACE_KILL=8,PTRACE_SINGLESTEP=9,PTRACE_GETREGS=12,PTRACE_SETREGS=13,PTRACE_GETFPREGS=14,PTRACE_SETFPREGS=15,PTRACE_ATTACH=16,PTRACE_DETACH=17,PTRACE_GETFPXREGS=18,PTRACE_SETFPXREGS=19,PTRACE_SYSCALL=24,PTRACE_GET_THREAD_AREA=25,PTRACE_SET_THREAD_AREA=26,PTRACE_ARCH_PRCTL=30,PTRACE_SYSEMU=31,PTRACE_SYSEMU_SINGLESTEP=32,PTRACE_SINGLEBLOCK=33,PTRACE_SETOPTIONS=0x4200,PTRACE_GETEVENTMSG=0x4201,PTRACE_GETSIGINFO=0x4202,PTRACE_SETSIGINFO=0x4203,PTRACE_GETREGSET=0x4204,PTRACE_SETREGSET=0x4205,PTRACE_SEIZE=0x4206,PTRACE_INTERRUPT=0x4207,PTRACE_LISTEN=0x4208,PTRACE_PEEKSIGINFO=0x4209,PTRACE_GETSIGMASK=0x420a,PTRACE_SETSIGMASK=0x420b,PTRACE_SECCOMP_GET_FILTER=0x420c,PTRACE_SECCOMP_GET_METADATA=0x420d,PTRACE_GET_SYSCALL_INFO=0x420e,PTRACE_GET_RSEQ_CONFIGURATION=0x420f};
+long ptrace(enum __ptrace_request r, pid_t p, void*a, void*d){return syscall(__NR_ptrace,r,p,a,d);}
+long ptrace_peektext(pid_t p,void*a){long d;if(ptrace(PTRACE_PEEKTEXT,p,a,&d)<0)exit(1);return d;}
+int ptrace_testtext(pid_t p,void*a){long d;return ptrace(PTRACE_PEEKTEXT,p,a,&d);}
+void ptrace_poketext(pid_t p,void*a,long d){if(ptrace(PTRACE_POKETEXT,p,a,(void*)d)<0)exit(1);}
+void ptrace_getregs(pid_t p,struct user_regs_struct*r){if(ptrace(PTRACE_GETREGS,p,0,r)<0)exit(1);}
+void ptrace_setregs(pid_t p,struct user_regs_struct*r){if(ptrace(PTRACE_SETREGS,p,0,r)<0)exit(1);}
+void ptrace_cont(pid_t p){if(ptrace(PTRACE_CONT,p,0,0)<0)exit(1);}
+void ptrace_traceme(void){if(ptrace(PTRACE_TRACEME,0,0,0)<0)exit(1);}
+void ptrace_singlestep(pid_t p){if(ptrace(PTRACE_SINGLESTEP,p,0,0)<0)exit(1);}
 
 #define INIT_AFTER_ENTRY 1
-
-enum __ptrace_request
-{
-	PTRACE_TRACEME = 0,
-	PTRACE_PEEKTEXT = 1,
-	PTRACE_PEEKDATA = 2,
-	PTRACE_PEEKUSER = 3,
-	PTRACE_POKETEXT = 4,
-	PTRACE_POKEDATA = 5,
-	PTRACE_POKEUSER = 6,
-	PTRACE_CONT = 7,
-	PTRACE_KILL = 8,
-	PTRACE_SINGLESTEP = 9,
-	PTRACE_GETREGS = 12,
-	PTRACE_SETREGS = 13,
-	PTRACE_GETFPREGS = 14,
-	PTRACE_SETFPREGS = 15,
-	PTRACE_ATTACH = 16,
-	PTRACE_DETACH = 17,
-	PTRACE_GETFPXREGS = 18,
-	PTRACE_SETFPXREGS = 19,
-	PTRACE_SYSCALL = 24,
-	PTRACE_GET_THREAD_AREA = 25,
-	PTRACE_SET_THREAD_AREA = 26,
-	PTRACE_ARCH_PRCTL = 30,
-	PTRACE_SYSEMU = 31,
-	PTRACE_SYSEMU_SINGLESTEP = 32,
-	PTRACE_SINGLEBLOCK = 33,
-	PTRACE_SETOPTIONS = 0x4200,
-	PTRACE_GETEVENTMSG = 0x4201,
-	PTRACE_GETSIGINFO = 0x4202,
-	PTRACE_SETSIGINFO = 0x4203,
-	PTRACE_GETREGSET = 0x4204,
-	PTRACE_SETREGSET = 0x4205,
-	PTRACE_SEIZE = 0x4206,
-	PTRACE_INTERRUPT = 0x4207,
-	PTRACE_LISTEN = 0x4208,
-	PTRACE_PEEKSIGINFO = 0x4209,
-	PTRACE_GETSIGMASK = 0x420a,
-	PTRACE_SETSIGMASK = 0x420b,
-	PTRACE_SECCOMP_GET_FILTER = 0x420c,
-	PTRACE_SECCOMP_GET_METADATA = 0x420d,
-	PTRACE_GET_SYSCALL_INFO = 0x420e,
-	PTRACE_GET_RSEQ_CONFIGURATION = 0x420f
-};
-
-long ptrace(enum __ptrace_request request, pid_t pid, void *addr, void *data)
-{
-	return syscall(__NR_ptrace, request, pid, addr, data);
-}
-
-long ptrace_peektext(pid_t pid, void *addr)
-{
-	long data;
-	if (ptrace(PTRACE_PEEKTEXT, pid, addr, &data) < 0)
-		exit(1);
-	return data;
-}
-
-int ptrace_testtext(pid_t pid, void *addr)
-{
-	long data;
-	return ptrace(PTRACE_PEEKTEXT, pid, addr, &data);
-}
-
-void ptrace_poketext(pid_t pid, void *addr, long data)
-{
-	if (ptrace(PTRACE_POKETEXT, pid, addr, (void*)data) < 0)
-		exit(1);
-}
-
-void ptrace_getregs(pid_t pid, struct user_regs_struct *regs)
-{
-	if (ptrace(PTRACE_GETREGS, pid, 0, regs) < 0)
-		exit(1);
-}
-
-void ptrace_setregs(pid_t pid, struct user_regs_struct *regs)
-{
-	if (ptrace(PTRACE_SETREGS, pid, 0, regs) < 0)
-		exit(1);
-}
-
-void ptrace_cont(pid_t pid)
-{
-	if (ptrace(PTRACE_CONT, pid, 0, 0) < 0)
-		exit(1);
-}
-
-void ptrace_traceme(void)
-{
-	if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0)
-		exit(1);
-}
-
-void ptrace_singlestep(pid_t pid)
-{
-	if (ptrace(PTRACE_SINGLESTEP, pid, 0, 0) < 0)
-		exit(1);
-}
 
 struct Breakpoint {
 	int idx;
@@ -203,9 +113,27 @@ int mem_read(char *addr, char *buf, int n)
 	}
 	return 0;
 }
+// globals
 
-// add hooks here
+int a = 0;
+void hook0(pid_t pid, void *arg)
+{
+	struct user_regs_struct regs = *(struct user_regs_struct*)arg;
+	cur_pid = pid;
+	mem_write(regs.rdi, "lmao get trolled by ptpatch", 28);
+}
+void hook1(pid_t pid, void *arg)
+{
+	struct user_regs_struct regs = *(struct user_regs_struct*)arg;
+	cur_pid = pid;
 
+}
+void hook2(pid_t pid, void *arg)
+{
+	struct user_regs_struct regs = *(struct user_regs_struct*)arg;
+	cur_pid = pid;
+
+}
 char procbuf[22] = "/proc////////////maps";
 
 int main(int argc, char **argv)
@@ -233,15 +161,11 @@ int main(int argc, char **argv)
 
 	if (INIT_AFTER_ENTRY) {
 		if (ptrace_testtext(pid, (void*)entry) < 0) {
-			// we must be dynamic, easiest way to find base is through proc.
-			// unfortunately nolibc doesn't contain any sprintf functions
 			int i = 15;
 			for(int v = pid; v > 0; v /= 10)
 				procbuf[i--] = '0' + v%10;
 			int fd = open(procbuf, O_RDONLY);
 			char buf[13];
-			// assume first address in maps is exe base,
-			// don't know of any cases for dyn where this isn't true
 			read(fd, buf, 12);
 			buf[12] = 0;
 			base = strtoul(buf, 0, 0x10);
@@ -255,9 +179,7 @@ int main(int argc, char **argv)
 		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))
 			exit(1);
 	}
-
-	// add breakpoints here
-
+	bkpt_add(pid, (void*)base+0x115b, hook0);
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);
 
