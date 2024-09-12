@@ -34,6 +34,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut hook_str = String::new();
     let mut init_str = String::new();
 
+    let mut hook_sys = false;
+
     for path in opts.paths {
         let parsed = parse_file(&fs::read_to_string(&path)?)?;
         hook_str.push_str(&parsed.globals);
@@ -45,11 +47,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             match patch.breakpoint {
                 Breakpoint::Expr(s) => {
                     init_str.push_str(&format!("\tbkpt_add(pid, (void*){}, hook{});\n", s, hookcnt));
-                }
-                _ => {},
+                },
+                Breakpoint::Presys(s) => {
+                    hook_sys = true;
+                    init_str.push_str(&format!("\tpresys_hooks[{}] = hook{};\n", s, hookcnt));
+                },
+                Breakpoint::Postsys(s) => {
+                    hook_sys = true;
+                    init_str.push_str(&format!("\tpostsys_hooks[{}] = hook{};\n", s, hookcnt));
+                },
             }
             hookcnt += 1;
         }
+    }
+    
+    if hook_sys {
+        hook_str.insert_str(0, "#define HOOK_SYSCALLS\n");
     }
 
     let p1 = include_str!("../../../stub/stub-p1.c");
@@ -142,10 +155,14 @@ fn parse_breakpoint(line: &str) -> Result<Breakpoint, Box<dyn Error>> {
     if line.starts_with("pre-syscall") || line.starts_with("post-syscall") {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() > 1 {
+            let arg = match parts[1].parse::<i32>() {
+                Ok(_) => parts[1].to_string(),
+                Err(_) => format!("__NR_{}", parts[1]),
+            };
             if line.starts_with("pre") {
-                return Ok(Breakpoint::Presys(parts[1].to_string()));
+                return Ok(Breakpoint::Presys(arg));
             }
-            return Ok(Breakpoint::Postsys(parts[1].to_string()));
+            return Ok(Breakpoint::Postsys(arg));
         }
     }
 

@@ -91,6 +91,12 @@ void ptrace_cont(pid_t pid)
 		exit(1);
 }
 
+void ptrace_syscall(pid_t pid)
+{
+	if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
+		exit(1);
+}
+
 void ptrace_traceme(void)
 {
 	if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0)
@@ -136,7 +142,7 @@ void bkpt_insert(struct Breakpoint *bkpt)
 	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig&~0xff)|0xcc);
 }
 
-void bkpt_handle(pid_t pid)
+int bkpt_handle(pid_t pid)
 {
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
@@ -146,18 +152,40 @@ void bkpt_handle(pid_t pid)
 		if (bkpt_tab[i].addr == rip)
 			idx = i;
 	if (idx < 0)
-		return;
+		return -1;
 	struct Breakpoint *bkpt = &bkpt_tab[idx];
 	ptrace_poketext(pid, rip, bkpt->orig);
 	regs.rip -= 1;
 	if (bkpt_tab[idx].hook)
 		bkpt_tab[idx].hook(pid, &regs);
 	ptrace_setregs(pid, &regs);
-	int status;
 	ptrace_singlestep(pid);
-	waitpid(pid, &status, 0);
+	waitpid(pid, 0, 0);
 	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig&~0xff)|0xcc);
-	ptrace_cont(pid);
+	return 0;
+}
+
+#define MAX_SYSNR 500
+
+void (*presys_hooks[MAX_SYSNR])(pid_t, void *);
+void (*postsys_hooks[MAX_SYSNR])(pid_t, void *);
+
+void sys_handle(pid_t pid)
+{
+	struct user_regs_struct regs;
+	ptrace_getregs(pid, &regs);
+	int nr = regs.orig_rax;
+	printf("%d\n", nr);
+	if (nr >= 0 && nr < MAX_SYSNR && presys_hooks[nr])
+		presys_hooks[nr](pid, &regs);
+	if (nr == __NR_exit || nr == __NR_exit_group)
+		return;
+	ptrace_setregs(pid, &regs);
+	ptrace_syscall(pid);
+	waitpid(pid, 0, 0);
+	if (nr >= 0 && nr < MAX_SYSNR && postsys_hooks[nr])
+		postsys_hooks[nr](pid, &regs);
+	ptrace_setregs(pid, &regs);
 }
 
 int cur_pid = 0;
@@ -229,8 +257,7 @@ int main(int argc, char **argv)
 	}
 
 	int status;
-	waitpid(pid, &status, 0);
-
+	waitpid(pid, 0, 0);
 	if (INIT_AFTER_ENTRY) {
 		if (ptrace_testtext(pid, (void*)entry) < 0) {
 			// we must be dynamic, easiest way to find base is through proc.
@@ -250,22 +277,29 @@ int main(int argc, char **argv)
 		long orig = ptrace_peektext(pid, (void*)entry);
 		ptrace_poketext(pid, (void*)entry, (orig&~0xff)|0xcc);
 		ptrace_cont(pid);
-		int status;
 		waitpid(pid, &status, 0);
 		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))
 			exit(1);
 	}
+
+	#ifdef HOOK_SYSCALLS
+		#define RESUME ptrace_syscall
+	#else
+		#define RESUME ptrace_cont
+	#endif
 
 	// add breakpoints here
 
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);
 
-	ptrace_cont(pid);
+	RESUME(pid);
 	for(;;) {
 		waitpid(pid, &status, 0);
 		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
-			bkpt_handle(pid);
+			if (bkpt_handle(pid) < 0)
+				sys_handle(pid);
+			RESUME(pid);
 		} else  {
 			break;
 		}

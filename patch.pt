@@ -1,14 +1,5 @@
-// globals
-
-int a = 0;
 %%
-
-<@ base+0x115b
-	mem_write(regs.rdi, "lmao get trolled by ptpatch", 28);
-@>
-
-<@ post-syscall read
-@>
-
-<@ pre-syscall read
+<@ pre-syscall write
+	mem_write(regs.rsi, "lmao get trolled by ptpatch\n", 29);
+	//regs.rdx = 1;
 @>

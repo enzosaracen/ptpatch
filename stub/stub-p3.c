@@ -1,11 +1,14 @@
+
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);
 
-	ptrace_cont(pid);
+	RESUME(pid);
 	for(;;) {
 		waitpid(pid, &status, 0);
 		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
-			bkpt_handle(pid);
+			if (bkpt_handle(pid) < 0)
+				sys_handle(pid);
+			RESUME(pid);
 		} else  {
 			break;
 		}
