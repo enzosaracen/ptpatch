@@ -175,7 +175,6 @@ void sys_handle(pid_t pid)
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
 	int nr = regs.orig_rax;
-	printf("%d\n", nr);
 	if (nr >= 0 && nr < MAX_SYSNR && presys_hooks[nr])
 		presys_hooks[nr](pid, &regs);
 	if (nr == __NR_exit || nr == __NR_exit_group)
@@ -183,6 +182,7 @@ void sys_handle(pid_t pid)
 	ptrace_setregs(pid, &regs);
 	ptrace_syscall(pid);
 	waitpid(pid, 0, 0);
+	ptrace_getregs(pid, &regs);
 	if (nr >= 0 && nr < MAX_SYSNR && postsys_hooks[nr])
 		postsys_hooks[nr](pid, &regs);
 	ptrace_setregs(pid, &regs);
@@ -233,11 +233,21 @@ int mem_read(char *addr, char *buf, int n)
 }
 
 #define HOOK_SYSCALLS
+long saved_rdx;
+
 void hook0(pid_t pid, void *arg)
 {
-	struct user_regs_struct regs = *(struct user_regs_struct*)arg;
+	#define regs (*(struct user_regs_struct *)arg)
 	cur_pid = pid;
-	mem_write(regs.rsi, "lmao get trolled by ptpatch\n", 29);	//regs.rdx = 1;
+	mem_write(regs.rsi, "lmao get trolled by ptpatch\n", 29);	saved_rdx = regs.rdx;	regs.rdx = 29;
+	#undef regs
+}
+void hook1(pid_t pid, void *arg)
+{
+	#define regs (*(struct user_regs_struct *)arg)
+	cur_pid = pid;
+	regs.rax = saved_rdx;
+	#undef regs
 }
 
 char procbuf[22] = "/proc////////////maps";
@@ -276,6 +286,7 @@ int main(int argc, char **argv)
 			// assume first address in maps is exe base,
 			// don't know of any cases for dyn where this isn't true
 			read(fd, buf, 12);
+			close(fd);
 			buf[12] = 0;
 			base = strtoul(buf, 0, 0x10);
 			entry += base;
@@ -295,6 +306,7 @@ int main(int argc, char **argv)
 	#endif
 
 	presys_hooks[__NR_write] = hook0;
+	postsys_hooks[__NR_write] = hook1;
 
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);

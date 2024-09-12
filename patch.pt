@@ -1,5 +1,13 @@
+long saved_rdx;
+
 %%
+
 <@ pre-syscall write
 	mem_write(regs.rsi, "lmao get trolled by ptpatch\n", 29);
-	//regs.rdx = 1;
+	saved_rdx = regs.rdx;
+	regs.rdx = 29;
+@>
+
+<@ post-syscall write
+	regs.rax = saved_rdx;
 @>

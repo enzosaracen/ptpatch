@@ -175,7 +175,6 @@ void sys_handle(pid_t pid)
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
 	int nr = regs.orig_rax;
-	printf("%d\n", nr);
 	if (nr >= 0 && nr < MAX_SYSNR && presys_hooks[nr])
 		presys_hooks[nr](pid, &regs);
 	if (nr == __NR_exit || nr == __NR_exit_group)
@@ -183,6 +182,7 @@ void sys_handle(pid_t pid)
 	ptrace_setregs(pid, &regs);
 	ptrace_syscall(pid);
 	waitpid(pid, 0, 0);
+	ptrace_getregs(pid, &regs);
 	if (nr >= 0 && nr < MAX_SYSNR && postsys_hooks[nr])
 		postsys_hooks[nr](pid, &regs);
 	ptrace_setregs(pid, &regs);

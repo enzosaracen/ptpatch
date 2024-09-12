@@ -41,8 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         hook_str.push_str(&parsed.globals);
         for patch in parsed.patches {
             hook_str.push_str(&format!(
-                "void hook{}(pid_t pid, void *arg)\n{{\n\tstruct user_regs_struct regs = \
-                *(struct user_regs_struct*)arg;\n\tcur_pid = pid;\n{}\n}}\n",
+                "void hook{}(pid_t pid, void *arg)\n{{\n\t#define regs (*(struct user_regs_struct *)arg)\n\tcur_pid = pid;\n{}\n\t#undef regs\n}}\n",
                 hookcnt, patch.body));
             match patch.breakpoint {
                 Breakpoint::Expr(s) => {

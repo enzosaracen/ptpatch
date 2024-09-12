@@ -35,6 +35,7 @@ int main(int argc, char **argv)
 			// assume first address in maps is exe base,
 			// don't know of any cases for dyn where this isn't true
 			read(fd, buf, 12);
+			close(fd);
 			buf[12] = 0;
 			base = strtoul(buf, 0, 0x10);
 			entry += base;
