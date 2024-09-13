@@ -248,20 +248,76 @@ int mem_read(char *addr, char *buf, int n)
 }
 
 #define HOOK_SYSCALLS
-long saved_rdx;
+// globals/arbitrary C code accessible by all hooks go at the top
+// of the file before a delimiting line containing "%%".
+// be careful of clobbering predefined convenience variables/functions,
+// which are viewable in stub.gen.c
+
+int break_cnt = 0;
+long saved_rdx = 0;
+
+// following the "%%", a series of hooks are defined in the format:
+// <@ `breakpoint`
+//     // C code
+// @>
+
+// `breakpoint` is usually interpreted as an arbitrary
+// C expression that evaluates to an address in the binary to break on,
+// unless `breakpoint` matches the following special cases:
+//      - starts with `pre-syscall` or `post-syscall`,
+//        followed by a syscall name or number
+
+// the predefined variable `base` contains the exe base address for
+// PIE executables, which will be necessary to specify valid breakpoints
 
 void hook0(pid_t pid, void *arg)
 {
 	#define regs (*(struct user_regs_struct *)arg)
 	cur_pid = pid;
-	mem_write(regs.rsi, "lmao get trolled by ptpatch\n", 29);	saved_rdx = regs.rdx;	regs.rdx = 29;
+    // predefined variables/functions available in hooks:
+
+    // - `regs` defines current register state,
+    //      - of type `struct user_regs_struct`
+    //      - any modifications will be committed
+    //        after the hook finishes
+
+	// - `pid` pid of current tracee
+
+    // - `int mem_write(char *addr, char *buf, int n)`
+    //      - writes `n` bytes from `buf` to `addr` in the
+    //        tracee's memory
+
+    // - `int mem_read(char *addr, char *buf, int n)`
+    //      - reads `n` bytes from `addr` into `buf` from
+    //        the tracee's memory
+    
+    break_cnt++;
+    printf("hit base+0x1151 %d times\n", break_cnt);
+
 	#undef regs
 }
 void hook1(pid_t pid, void *arg)
 {
 	#define regs (*(struct user_regs_struct *)arg)
 	cur_pid = pid;
-	regs.rax = saved_rdx;
+    // pre-syscall hooks will be run before the syscall is entered
+    
+    mem_write(regs.rsi, "intercepted!\n", 13);
+    saved_rdx = regs.rdx;
+    regs.rdx = 13;
+
+	#undef regs
+}
+void hook2(pid_t pid, void *arg)
+{
+	#define regs (*(struct user_regs_struct *)arg)
+	cur_pid = pid;
+    // post-syscall hooks will be run after the syscall is entered
+
+    // we do this to appease libc's write, thinking it wrote
+    // as many bytes as it originally requested
+    regs.rax = saved_rdx;
+
 	#undef regs
 }
 
@@ -321,8 +377,9 @@ int main(int argc, char **argv, char **envp)
 		#define RESUME ptrace_cont
 	#endif
 
-	presys_hooks[__NR_write] = hook0;
-	postsys_hooks[__NR_write] = hook1;
+	bkpt_add(pid, (void*)base+0x1151, hook0);
+	presys_hooks[__NR_write] = hook1;
+	postsys_hooks[__NR_write] = hook2;
 
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);

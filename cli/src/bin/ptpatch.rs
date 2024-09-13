@@ -143,6 +143,7 @@ fn parse_file(content: &str) -> Result<ParsedFile, Box<dyn Error>> {
             }
         } else if let Some(ref mut patch) = current_patch {
             patch.body.push_str(line);
+            patch.body.push('\n');
         }
     }
 
