@@ -6,7 +6,7 @@ use std::io::Write;
 use std::process::Command;
 use colored::*;
 
-include!(concat!(env!("OUT_DIR"), "/nolibc.rs"));
+include!(concat!(env!("OUT_DIR"), "/paths.rs"));
 
 #[derive(Parser)]
 struct Opt {

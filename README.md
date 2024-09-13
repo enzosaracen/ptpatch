@@ -1,5 +1,5 @@
 # ptpatch
-`ptpatch` is a dynamic binary patching tool for Linux that uses ptrace to inject arbitrarily complex modifications to the behavior of a binary at runtime. This is accomplished through a tracing stub with user-defined hooks that can control the tracee's registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
+`ptpatch` is a dynamic binary patching tool for Linux that uses ptrace to track and modify an executable's behavior at runtime. This is accomplished through a tracing stub with user-defined hooks that can control the tracee's registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
 
 ## Installation
 Run `./install.sh`. `cargo` and `gcc` are required.

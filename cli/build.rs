@@ -8,7 +8,7 @@ fn main() {
     let nolibc = PathBuf::from(&root).join("../nolibc/nolibc.h");
     let ldscript = PathBuf::from(&root).join("../stub/minimal.ld");
     let out = env::var("OUT_DIR").unwrap();
-    let dest = PathBuf::from(out).join("nolibc.rs");
+    let dest = PathBuf::from(out).join("paths.rs");
     let mut f = File::create(&dest).unwrap();
     write!(f,
         "pub const NOLIBC_PATH: &str = \"{}\";\n\
