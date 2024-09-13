@@ -91,28 +91,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         .open("stub.gen.c")?;
     genfile.write_all(format!("{}{}{}{}{}", p1, hook_str, p2, init_str, p3).as_bytes())?;
     genfile.flush()?;
-
     println!("stub written to stub.gen.c");
-    let nolibc = std::path::Path::new(NOLIBC_PATH).canonicalize()?;
 
-    println!("gcc -nostdlib -include {} -static -Os stub.gen.c -o stub.out -fdiagnostics-color=always", nolibc.display());
+    println!("gcc -nostdlib -nostartfiles -include {} \
+        -static -Os -fcf-protection=none -fdiagnostics-color=always \
+        -Wl,--gc-sections -Wl,--strip-all -Wl,--build-id=none -Wl,-T{} \
+        stub.gen.c -o stub.out", NOLIBC_PATH, LDSCRIPT_PATH);
     let output = Command::new("gcc")
         .arg("-nostdlib")
+        .arg("-nostartfiles")
         .arg("-include")
-        .arg(nolibc)
+        .arg(NOLIBC_PATH)
         .arg("-static")
         .arg("-Os")
+        .arg("-fcf-protection=none")
+        .arg("-fdiagnostics-color=always")
+        .arg("-Wl,--gc-sections")
+        .arg("-Wl,--strip-all")
+        .arg("-Wl,--build-id=none")
+        .arg(format!("-Wl,-T{}", LDSCRIPT_PATH))
         .arg("stub.gen.c")
         .arg("-o")
         .arg("stub.out")
-        .arg("-fdiagnostics-color=always")
         .output()?;
     println!("{}", String::from_utf8_lossy(&output.stdout));
     eprintln!("{}", String::from_utf8_lossy(&output.stderr));
     if !output.status.success() {
         return Err("failed to compile stub.gen.c".into());
     }
-    let output = Command::new("strip")
+    let output = Command::new("objcopy")
+        .arg("--strip-section-headers")
         .arg("stub.out")
         .output()?;
     if !output.status.success() {

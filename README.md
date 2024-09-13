@@ -87,12 +87,11 @@ long saved_rdx;
 
 // hook at a specific address
 <@ base+0x1151
-    break_cnt++;
-    printf("Hit breakpoint at base+0x1151 %d times\n", break_cnt);
+    printf("Hit breakpoint at base+0x1151 %d times\n", break_cnt++);
 @>
 
 <@ pre-syscall write
-    // intercept and modify the buffer being written
+    // modify the buffer being written
     mem_write((char *)regs.rsi, "intercepted!\n", 13);
     saved_rdx = regs.rdx;
     regs.rdx = 13; // update the number of bytes to write
