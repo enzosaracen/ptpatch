@@ -25,8 +25,8 @@ Patch files are written in a specific format that combines C code with special m
 1. **Globals**: Declarations of global variables or functions accessible by all hooks
 
  ```c
- int break_cnt = 0;
- long saved_rdx = 0;
+ int break_cnt;
+ long saved_rdx;
  ```
 
 2. **Delimiter**: A line containing only `%%` separates the global declarations from the hooks
@@ -53,16 +53,16 @@ The different breakpoint types are defined as follows:
     ```
     `base` is a predefined variable representing the executable's base address (useful for PIE executables)
 
-- **Pre-syscall**: code to execute before the entry of a certain syscall (specified by name or number)
+- **Pre-syscall**: executes before the entry of a certain syscall (specified by name or number, comma separated list for multiple syscalls)
     ```c
-    <@ pre-syscall write
+    <@ pre-syscall write, read, 96
       // modify syscall arguments
     @>
     ```
 
-- **Post-syscall**: code to execute after the completion of a certain syscall
+- **Post-syscall**: executes after the completion of a certain syscall
     ```c
-    <@ post-syscall write
+    <@ post-syscall write, read, 96
       // inspect or modify return values
     @>
     ```
@@ -80,8 +80,8 @@ The code within each hook has access to the following predefined variables and f
 **Example**
 ```c
 // global variables
-int break_cnt = 0;
-long saved_rdx = 0;
+int break_cnt;
+long saved_rdx;
 
 %%
 

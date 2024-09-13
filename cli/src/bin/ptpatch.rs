@@ -16,8 +16,8 @@ struct Opt {
 
 enum Breakpoint {
     Expr(String),
-    Presys(String),
-    Postsys(String),
+    Presys(Vec<String>),
+    Postsys(Vec<String>),
 }
 
 struct Patch {
@@ -39,23 +39,37 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut hook_sys = false;
 
     for path in opts.paths {
-        let parsed = parse_file(&fs::read_to_string(&path)?)?;
+        let content = fs::read_to_string(&path)?;
+        let parsed = parse_file(&content)?;
         hook_str.push_str(&parsed.globals);
         for patch in parsed.patches {
             hook_str.push_str(&format!(
-                "void hook{}(pid_t pid, void *arg)\n{{\n\t#define regs (*(struct user_regs_struct *)arg)\n\tcur_pid = pid;\n{}\n\t#undef regs\n}}\n",
+                "void hook{}(pid_t pid, void *arg)\n{{\n\t#define regs (*(struct user_regs_struct *)\
+                arg)\n\tcur_pid = pid;\n{}\n\t#undef regs\n}}\n",
                 hookcnt, patch.body));
             match patch.breakpoint {
                 Breakpoint::Expr(s) => {
                     init_str.push_str(&format!("\tbkpt_add(pid, (void*){}, hook{});\n", s, hookcnt));
                 },
-                Breakpoint::Presys(s) => {
+                Breakpoint::Presys(names) => {
                     hook_sys = true;
-                    init_str.push_str(&format!("\tpresys_hooks[{}] = hook{};\n", s, hookcnt));
+                    for name in names {
+                        let arg = match name.parse::<i32>() {
+                            Ok(_) => name,
+                            Err(_) => format!("__NR_{}", name),
+                        };
+                        init_str.push_str(&format!("\tpresys_hooks[{}] = hook{};\n", arg, hookcnt));
+                    }
                 },
-                Breakpoint::Postsys(s) => {
+                Breakpoint::Postsys(names) => {
                     hook_sys = true;
-                    init_str.push_str(&format!("\tpostsys_hooks[{}] = hook{};\n", s, hookcnt));
+                    for name in names {
+                        let arg = match name.parse::<i32>() {
+                            Ok(_) => name,
+                            Err(_) => format!("__NR_{}", name),
+                        };
+                        init_str.push_str(&format!("\tpostsys_hooks[{}] = hook{};\n", arg, hookcnt));
+                    }
                 },
             }
             hookcnt += 1;
@@ -112,22 +126,30 @@ fn parse_file(content: &str) -> Result<ParsedFile, Box<dyn Error>> {
     let mut lines = content.lines();
     let mut globals = String::new();
     let mut patches = Vec::new();
+    let mut in_globals = true;
+    let mut line_start = 1;
 
     while let Some(line) = lines.next() {
+        line_start += 1;
         if line.trim() == "%%" {
+            in_globals = false;
             break;
         }
         globals.push_str(line);
         globals.push('\n');
     }
 
+    if in_globals {
+        return Err("missing '%%' separator between globals and hooks".into());
+    }
+
     let mut current_patch: Option<Patch> = None;
-    for line in lines {
+    for (line_num, line) in lines.enumerate() {
         let txt = line.trim();
 
         if txt.starts_with("<@") {
-            if let Some(patch) = current_patch.take() {
-                patches.push(patch);
+            if current_patch.is_some() {
+                return Err(format!("found '<@' while previous hook not closed with '@>' at line {}", line_start+line_num).into());
             }
             let breakpoint = parse_breakpoint(txt)?;
             current_patch = Some(Patch {
@@ -137,11 +159,21 @@ fn parse_file(content: &str) -> Result<ParsedFile, Box<dyn Error>> {
         } else if txt == "@>" {
             if let Some(patch) = current_patch.take() {
                 patches.push(patch);
+            } else {
+                return Err(format!("found '@>' without matching '<@' at line {}", line_start+line_num).into());
             }
         } else if let Some(ref mut patch) = current_patch {
             patch.body.push_str(line);
             patch.body.push('\n');
+        } else {
+            if !txt.is_empty() && !txt.trim().starts_with("//") {
+                return Err(format!("unexpected content outside of a hook at line {}: {}", line_start+line_num, txt).into());
+            }
         }
+    }
+
+    if current_patch.is_some() {
+        return Err("unclosed hook: missing '@>' at the end of file".into());
     }
 
     Ok(ParsedFile { globals, patches })
@@ -149,19 +181,28 @@ fn parse_file(content: &str) -> Result<ParsedFile, Box<dyn Error>> {
 
 fn parse_breakpoint(line: &str) -> Result<Breakpoint, Box<dyn Error>> {
     let line = line.trim_start_matches("<@").trim();
-    if line.starts_with("pre-syscall") || line.starts_with("post-syscall") {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() > 1 {
-            let arg = match parts[1].parse::<i32>() {
-                Ok(_) => parts[1].to_string(),
-                Err(_) => format!("__NR_{}", parts[1]),
-            };
-            if line.starts_with("pre") {
-                return Ok(Breakpoint::Presys(arg));
-            }
-            return Ok(Breakpoint::Postsys(arg));
+    if line.starts_with("pre-syscall") {
+        let rest = line.strip_prefix("pre-syscall").ok_or("invalid pre-syscall format")?.trim();
+        if rest.is_empty() {
+            return Err("pre-syscall must be followed by a list of syscall names or numbers".into());
         }
+        let names = rest.split(',')
+            .map(|s| s.trim().to_string())
+            .collect::<Vec<String>>();
+        return Ok(Breakpoint::Presys(names));
+    } else if line.starts_with("post-syscall") {
+        let rest = line.strip_prefix("post-syscall").ok_or("invalid post-syscall format")?.trim();
+        if rest.is_empty() {
+            return Err("post-syscall must be followed by a list of syscall names or numbers".into());
+        }
+        let names = rest.split(',')
+            .map(|s| s.trim().to_string())
+            .collect::<Vec<String>>();
+        return Ok(Breakpoint::Postsys(names));
+    } else {
+        if line.is_empty() {
+            return Err("breakpoint expression cannot be empty".into());
+        }
+        return Ok(Breakpoint::Expr(line.to_string()));
     }
-
-    Ok(Breakpoint::Expr(line.to_string()))
 }
