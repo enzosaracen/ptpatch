@@ -9,17 +9,13 @@ Run `./build.sh` in the project's root directory. The `./ptpatch` symlink should
 
 Alternatively, the stub can embed a single binary file using the `--embed` flag followed by a path to that binary. Running the embedded `stub.out` will execute the stub with that binary directly, passing through all arguments. This avoids an `execve` call by mimicking its behavior in-process, similar to how UPX works (although no compression is applied during the embedding).
 
-## Patch File Format
+## Format
 
-Patch files are written in a specific format that combines C code with special markers to define hooks.
-Warning: all C code written for patches is compiled using Linux's [nolibc](https://elixir.bootlin.com/linux/v6.10.9/source/tools/include/nolibc) to minimize stub size, so certain usual libc features may not be available.
+Patch files are written in a specific format that combines C code with special markers to define hooks. Code written for patches is compiled using Linux's [nolibc](https://elixir.bootlin.com/linux/v6.10.9/source/tools/include/nolibc) to minimize stub size, so certain libc features may not be available. The structure of patch files is split into the following parts.
 
-**Structure**:
-
-1. **Global Declarations**: Any global variables or functions accessible by all hooks.
+1. **Globals**: Declarations of global variables or functions accessible by all hooks.
 
  ```c
- // Global variables and functions
  int break_cnt = 0;
  long saved_rdx = 0;
  ```
@@ -38,21 +34,17 @@ Warning: all C code written for patches is compiled using Linux's [nolibc](https
  @>
  ```
 
-- **Defining Breakpoints**:
+The different breakpoint types are defined as follows.
 
-- **Address-Based Breakpoints**: Use an expression that evaluates to an address.
-
+- **Address-based**: Use a C expression that evaluates to an address.
 ```c
 <@ base+0x1234
     // code to execute once execution reaches this address
 @>
 ```
+`base`: Predefined variable representing the executable's base address (useful for PIE executables).
 
-- `base`: Predefined variable representing the executable's base address (useful for PIE executables).
-
-- **Syscall Hooks**: Special breakpoints for system calls.
-
-- **Pre-Syscall**: Code to execute before a syscall.
+- **Pre-syscall**: Code to execute before the entry of a syscall.
 
   ```c
   <@ pre-syscall write
@@ -60,25 +52,26 @@ Warning: all C code written for patches is compiled using Linux's [nolibc](https
   @>
   ```
 
-- **Post-Syscall**: Code to execute after a syscall.
+- **Post-syscall**: Code to execute after the completion of a syscall.
 
   ```c
   <@ post-syscall write
       // inspect or modify return values
   @>
   ```
+The syscall type can be specified by name or number.
 
-- **Available Variables and Functions**:
+The code within each hook has access to the following predefined variables and functions.
 
-- `regs`: Struct `user_regs_struct` representing the current register state. Modifications will be applied to the tracee.
+- `regs`: struct `user_regs_struct` representing the current register state. Modifications will be applied to the tracee once the hook returns.
 
-- `pid`: The process ID of the tracee.
+- `pid`: PID of the tracee.
 
 - `mem_write(char *addr, char *buf, int n)`: Write `n` bytes from `buf` to the tracee's memory at `addr`.
 
 - `mem_read(char *addr, char *buf, int n)`: Read `n` bytes from the tracee's memory at `addr` into `buf`.
 
-- **Annotated Example**:
+- **Example**:
 
 ```c
 // Global variables
