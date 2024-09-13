@@ -11,7 +11,7 @@ Alternatively, the stub can embed a single binary file using the `--embed` flag 
 
 ## Format
 
-Patch files are written in a specific format that combines C code with special markers to define hooks. Code written for patches is compiled using Linux's [nolibc](https://elixir.bootlin.com/linux/v6.10.9/source/tools/include/nolibc) to minimize stub size, so certain libc features may not be available. The structure of patch files is split into the following parts.
+Patch files are written in a specific format that combines C code with special markers to define hooks. Code written for patches is compiled using Linux's [nolibc](https://elixir.bootlin.com/linux/v6.10.9/source/tools/include/nolibc) to minimize stub size, so certain libc features may not be available. The structure of patch files is outlined as follows.
 
 1. **Globals**: Declarations of global variables or functions accessible by all hooks.
 
@@ -26,7 +26,7 @@ Patch files are written in a specific format that combines C code with special m
  %%
  ```
 
-3. **Hooks**: Defined using `<@` and `@>` with a specified breakpoint or condition.
+3. **Hooks**: Enclosed by `<@` and `@>` with a specified breakpoint or condition.
 
  ```c
  <@ breakpoint
@@ -34,67 +34,63 @@ Patch files are written in a specific format that combines C code with special m
  @>
  ```
 
-The different breakpoint types are defined as follows.
+The different breakpoint types are defined as follows:
 
-- **Address-based**: Use a C expression that evaluates to an address.
-```c
-<@ base+0x1234
-    // code to execute once execution reaches this address
-@>
-```
-`base`: Predefined variable representing the executable's base address (useful for PIE executables).
+- **Address-based**: use a C expression that evaluates to an address.
+    ```c
+    <@ base+0x1234
+        // code to be executed each time we hit base+0x1234
+    @>
+    ```
+    `base` is a predefined variable representing the executable's base address (useful for PIE executables).
 
-- **Pre-syscall**: Code to execute before the entry of a syscall.
-
-  ```c
-  <@ pre-syscall write
+- **Pre-syscall**: code to execute before the entry of a certain syscall (specified by name or number).
+    ```c
+    <@ pre-syscall write
       // modify syscall arguments
-  @>
-  ```
+    @>
+    ```
 
-- **Post-syscall**: Code to execute after the completion of a syscall.
-
-  ```c
-  <@ post-syscall write
+- **Post-syscall**: code to execute after the completion of a certain syscall.
+    ```c
+    <@ post-syscall write
       // inspect or modify return values
-  @>
-  ```
-The syscall type can be specified by name or number.
+    @>
+    ```
 
 The code within each hook has access to the following predefined variables and functions.
 
 - `regs`: struct `user_regs_struct` representing the current register state. Modifications will be applied to the tracee once the hook returns.
 
-- `pid`: PID of the tracee.
+- `pid`: pid of the tracee.
 
-- `mem_write(char *addr, char *buf, int n)`: Write `n` bytes from `buf` to the tracee's memory at `addr`.
+- `mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`.
 
-- `mem_read(char *addr, char *buf, int n)`: Read `n` bytes from the tracee's memory at `addr` into `buf`.
+- `mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`.
 
-- **Example**:
+**Example**
+    ```c
+    // Global variables
+    int break_cnt = 0;
+    long saved_rdx = 0;
 
-```c
-// Global variables
-int break_cnt = 0;
-long saved_rdx = 0;
+    %%
 
-%%
+    // Hook at a specific address
+    <@ base+0x1151
+      break_cnt++;
+      printf("Hit breakpoint at base+0x1151 %d times\n", break_cnt);
+    @>
 
-// Hook at a specific address
-<@ base+0x1151
-  break_cnt++;
-  printf("Hit breakpoint at base+0x1151 %d times\n", break_cnt);
-@>
+    <@ pre-syscall write
+      // Intercept and modify the buffer being written
+      mem_write((char *)regs.rsi, "intercepted!\n", 13);
+      saved_rdx = regs.rdx;
+      regs.rdx = 13; // Update the number of bytes to write
+    @>
 
-<@ pre-syscall write
-  // Intercept and modify the buffer being written
-  mem_write((char *)regs.rsi, "intercepted!\n", 13);
-  saved_rdx = regs.rdx;
-  regs.rdx = 13; // Update the number of bytes to write
-@>
-
-<@ post-syscall write
-  // Restore the original number of bytes written
-  regs.rax = saved_rdx;
-@>
-```
+    <@ post-syscall write
+      // Restore the original number of bytes written
+      regs.rax = saved_rdx;
+    @>
+    ```
