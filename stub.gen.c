@@ -3,6 +3,15 @@
 
 #define INIT_AFTER_ENTRY 1
 
+#define PTRACE_O_TRACESYSGOOD   0x01
+#define PTRACE_O_TRACEFORK      0x02
+#define PTRACE_O_TRACEVFORK     0x04
+#define PTRACE_O_TRACECLONE     0x08
+#define PTRACE_O_TRACEEXEC      0x10
+#define PTRACE_O_TRACEVFORKDONE 0x20
+#define PTRACE_O_TRACEEXIT      0x40
+#define PTRACE_O_TRACESECCOMP   0x80
+
 enum __ptrace_request
 {
 	PTRACE_TRACEME = 0,
@@ -109,6 +118,12 @@ void ptrace_singlestep(pid_t pid)
 		exit(1);
 }
 
+void ptrace_setoptions(pid_t pid, long data)
+{
+	if (ptrace(PTRACE_SETOPTIONS, pid, 0, (void*)data) < 0)
+		exit(1);
+}
+
 struct Breakpoint {
 	int idx;
 	pid_t pid;
@@ -170,22 +185,22 @@ int bkpt_handle(pid_t pid)
 void (*presys_hooks[MAX_SYSNR])(pid_t, void *);
 void (*postsys_hooks[MAX_SYSNR])(pid_t, void *);
 
+int last_was_entry = 0;
+
 void sys_handle(pid_t pid)
 {
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
 	int nr = regs.orig_rax;
-	if (nr >= 0 && nr < MAX_SYSNR && presys_hooks[nr])
-		presys_hooks[nr](pid, &regs);
-	if (nr == __NR_exit || nr == __NR_exit_group)
-		return;
+	if (nr >= 0 && nr < MAX_SYSNR) {
+		if (last_was_entry) {
+			if (postsys_hooks[nr])
+				postsys_hooks[nr](pid, &regs);
+		} else if (presys_hooks[nr])
+			presys_hooks[nr](pid, &regs);
+	}
 	ptrace_setregs(pid, &regs);
-	ptrace_syscall(pid);
-	waitpid(pid, 0, 0);
-	ptrace_getregs(pid, &regs);
-	if (nr >= 0 && nr < MAX_SYSNR && postsys_hooks[nr])
-		postsys_hooks[nr](pid, &regs);
-	ptrace_setregs(pid, &regs);
+	last_was_entry = !last_was_entry;
 }
 
 int cur_pid = 0;
@@ -252,7 +267,7 @@ void hook1(pid_t pid, void *arg)
 
 char procbuf[22] = "/proc////////////maps";
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
 	if (argc < 2)
 		return 1;
@@ -268,7 +283,7 @@ int main(int argc, char **argv)
 	pid_t pid = fork();
 	if (!pid) {
 		ptrace_traceme();
-		execve(argv[1], &argv[1], 0);
+		execve(argv[1], &argv[1], envp);
 		exit(1);
 	}
 
@@ -301,6 +316,7 @@ int main(int argc, char **argv)
 
 	#ifdef HOOK_SYSCALLS
 		#define RESUME ptrace_syscall
+		ptrace_setoptions(pid, PTRACE_O_TRACESYSGOOD);
 	#else
 		#define RESUME ptrace_cont
 	#endif
@@ -314,9 +330,13 @@ int main(int argc, char **argv)
 	RESUME(pid);
 	for(;;) {
 		waitpid(pid, &status, 0);
+		int is_syscall = status & 0x8000;
+		status = status & ~0x8000;
 		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
-			if (bkpt_handle(pid) < 0)
+			if (is_syscall)
 				sys_handle(pid);
+			else
+				bkpt_handle(pid);
 			RESUME(pid);
 		} else  {
 			break;

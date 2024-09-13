@@ -1,7 +1,7 @@
 
 char procbuf[22] = "/proc////////////maps";
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
 	if (argc < 2)
 		return 1;
@@ -17,7 +17,7 @@ int main(int argc, char **argv)
 	pid_t pid = fork();
 	if (!pid) {
 		ptrace_traceme();
-		execve(argv[1], &argv[1], 0);
+		execve(argv[1], &argv[1], envp);
 		exit(1);
 	}
 
@@ -50,6 +50,7 @@ int main(int argc, char **argv)
 
 	#ifdef HOOK_SYSCALLS
 		#define RESUME ptrace_syscall
+		ptrace_setoptions(pid, PTRACE_O_TRACESYSGOOD);
 	#else
 		#define RESUME ptrace_cont
 	#endif

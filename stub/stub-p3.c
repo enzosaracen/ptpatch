@@ -5,9 +5,13 @@
 	RESUME(pid);
 	for(;;) {
 		waitpid(pid, &status, 0);
+		int is_syscall = status & 0x8000;
+		status = status & ~0x8000;
 		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
-			if (bkpt_handle(pid) < 0)
+			if (is_syscall)
 				sys_handle(pid);
+			else
+				bkpt_handle(pid);
 			RESUME(pid);
 		} else  {
 			break;

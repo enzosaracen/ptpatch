@@ -2,5 +2,5 @@
 
 cd stub
 make
-cd ../cmd
+cd ../cli
 cargo build --release
