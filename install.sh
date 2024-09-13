@@ -3,4 +3,4 @@
 cd stub
 make
 cd ../cli
-cargo build --release
+cargo install --path .

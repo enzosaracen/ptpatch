@@ -2,23 +2,22 @@
 `ptpatch` is a dynamic binary patching tool for Linux that uses ptrace to inject arbitrarily complex modifications to the behavior of a binary at runtime. This is accomplished through a tracing stub with user-defined hooks that can control the tracee's registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
 
 ## Installation
-Run `./build.sh` in the project's root directory. The `./ptpatch` symlink should now point to the CLI binary (located at `./cli/target/release/ptpatch`). `cargo`+`rustc` and `gcc` are required.
+Run `./install.sh`. `cargo` and `gcc` are required.
 
 ## Usage
-The `ptpatch` CLI processes one or more patch files and generates a tracing stub that can be used to run a target executable with the patches applied.
+The `ptpatch` CLI processes one or more patch files and generates a tracing stub that can run an arbitrary executable with the patches applied.
 
 ```
 ptpatch [options] [patch_files ...]
 ```
 
-The file `stub.gen.c` will be generated and automatically compiled to `stub.out`
+The file `stub.gen.c` will be generated and automatically compiled to `stub.out`.
 
 ```
 ./stub.out /path/to/exe [args ...]
 ```
 
-The `--embed` option with a file argument causes `stub.out` to contain a single binary such that executing `stub.out` will always run the embedded binary and apply patches. This method avoids the need for an execve syscall by mimicking its behavior in-process, similar to how UPX operates (but without compression).
-
+The `--embed` option to `ptpatch` followed by a file argument embeds the specified binary directly into `stub.out`. `stub.out` will then run the embedded binary without needing to specify the executable as an argument. This method avoids the need for an `execve` syscall by emulating its behavior in-process, similar to how UPX operates (but without applying compression).
 
 ## Format
 Patch files are written in a specific format that combines C code with special markers to define hooks. Code written for patches is compiled using Linux's [nolibc](https://elixir.bootlin.com/linux/v6.10.9/source/tools/include/nolibc) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
@@ -80,27 +79,27 @@ The code within each hook has access to the following predefined variables and f
 
 **Example**
 ```c
-// Global variables
+// global variables
 int break_cnt = 0;
 long saved_rdx = 0;
 
 %%
 
-// Hook at a specific address
+// hook at a specific address
 <@ base+0x1151
     break_cnt++;
     printf("Hit breakpoint at base+0x1151 %d times\n", break_cnt);
 @>
 
 <@ pre-syscall write
-    // Intercept and modify the buffer being written
+    // intercept and modify the buffer being written
     mem_write((char *)regs.rsi, "intercepted!\n", 13);
     saved_rdx = regs.rdx;
-    regs.rdx = 13; // Update the number of bytes to write
+    regs.rdx = 13; // update the number of bytes to write
 @>
 
 <@ post-syscall write
-    // Restore the original number of bytes written
+    // restore the original number of bytes written
     regs.rax = saved_rdx;
 @>
 ```

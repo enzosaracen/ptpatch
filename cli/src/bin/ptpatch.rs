@@ -6,6 +6,8 @@ use std::io::Write;
 use std::process::Command;
 use colored::*;
 
+include!(concat!(env!("OUT_DIR"), "/nolibc.rs"));
+
 #[derive(Parser)]
 struct Opt {
     #[arg(required = true, num_args = 1.., value_name = "FILE")]
@@ -77,12 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     genfile.flush()?;
 
     println!("stub written to stub.gen.c");
-    let nolibc = std::env::current_exe()?
-        .parent()
-        .unwrap()
-        .join("../../../nolibc/nolibc.h")
-        .canonicalize()
-        .unwrap();
+    let nolibc = std::path::Path::new(NOLIBC_PATH).canonicalize()?;
 
     println!("gcc -nostdlib -include {} -static -Os stub.gen.c -o stub.out -fdiagnostics-color=always", nolibc.display());
     let output = Command::new("gcc")
