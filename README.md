@@ -17,7 +17,7 @@ The file `stub.gen.c` will be generated and automatically compiled to `stub.out`
 ./stub.out /path/to/exe [args ...]
 ```
 
-The `--embed` option to `ptpatch` followed by a file argument embeds the specified binary directly into `stub.out`. `stub.out` will then run the embedded binary without needing to specify the executable as an argument. This method avoids the need for an `execve` syscall by emulating its behavior in-process, similar to how UPX operates (but without applying compression).
+The `--embed` option passed to `ptpatch` followed by a file argument will embed the specified binary directly into `stub.out`. `stub.out` will then run the embedded binary without needing to specify it as an argument. This method avoids the need for an `execve` syscall by emulating its behavior in-process, similar to how UPX operates (but without applying compression).
 
 ## Format
 Patch files are written in a specific format that combines C code with special markers to define hooks. Code written for patches is compiled using Linux's [nolibc](https://elixir.bootlin.com/linux/v6.10.9/source/tools/include/nolibc) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
@@ -67,7 +67,7 @@ The different breakpoint types are defined as follows:
     @>
     ```
 
-The code within each hook has access to the following predefined variables and functions
+The code within each hook has access to the following predefined variables and functions.
 
 - `pid`: pid of the tracee
 
