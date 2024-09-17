@@ -253,23 +253,41 @@ char procbuf[22] = "/proc////////////maps";
 
 int main(int argc, char **argv, char **envp)
 {
-	if (argc < 2)
-		return 1;
-
 	unsigned long entry = 0;
-	if (INIT_AFTER_ENTRY) {
-		int fd = open(argv[1], O_RDONLY);
-		lseek(fd, 24, SEEK_SET);
-		read(fd, &entry, 8);
-		close(fd);
-	}
 
-	pid_t pid = fork();
-	if (!pid) {
-		ptrace_traceme();
-		execve(argv[1], &argv[1], envp);
-		exit(1);
-	}
+	#ifndef EMBED_EXECUTABLE	
+		if (argc < 2)
+			return 1;
+
+		if (INIT_AFTER_ENTRY) {
+			int fd = open(argv[1], O_RDONLY);
+			lseek(fd, 24, SEEK_SET);
+			read(fd, &entry, 8);
+			close(fd);
+		}
+
+		pid_t pid = fork();
+		if (!pid) {
+			ptrace_traceme();
+			execve(argv[1], &argv[1], envp);
+			exit(1);
+		}
+	#else
+		#include "embed.gen.h"
+		int fd = memfd_create("embed", 0);
+		write(fd, embed, embed_len);
+
+		if (INIT_AFTER_ENTRY) {
+			entry = *(unsigned long*)(embed+24);
+		}
+
+		pid_t pid = fork();
+		if (!pid) {
+			ptrace_traceme();
+			syscall(322, fd, "", argv, envp, 0x1000);
+			exit(1);
+		}
+	#endif
 
 	int status;
 	waitpid(pid, 0, 0);

@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fs::OpenOptions;
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 use std::process::Command;
 use colored::*;
 
@@ -10,8 +11,10 @@ include!(concat!(env!("OUT_DIR"), "/paths.rs"));
 
 #[derive(Parser)]
 struct Opt {
-    #[arg(required = true, num_args = 1.., value_name = "FILE")]
+    #[arg(required = true, num_args = 1.., value_name = "PATCH FILE")]
     paths: Vec<String>,
+    #[arg(short = 'e', long = "embed", value_name = "EXECUTABLE")]
+    embed: Option<String>,
 }
 
 enum Breakpoint {
@@ -31,14 +34,14 @@ struct ParsedFile {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let opts = Opt::parse();
+    let opt = Opt::parse();
     let mut hookcnt = 0;
     let mut hook_str = String::new();
     let mut init_str = String::new();
 
     let mut hook_sys = false;
 
-    for path in opts.paths {
+    for path in opt.paths {
         let content = fs::read_to_string(&path)?;
         let parsed = parse_file(&content)?;
         hook_str.push_str(&parsed.globals);
@@ -79,6 +82,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     if hook_sys {
         hook_str.insert_str(0, "#define HOOK_SYSCALLS\n");
     }
+    let mut is_embed = false;
+    if let Some(embed) = &opt.embed {
+        Path::new(embed).canonicalize()?;
+        is_embed = true;
+        // could do this with ld to avoid some build overhead, but this is easier
+        hook_str.insert_str(0, "#define EMBED_EXECUTABLE\n");
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(format!("xxd -i {} | \
+            sed -e 's/unsigned char [a-zA-Z0-9_]*\\[\\]/unsigned char embed[]/' \
+            -e 's/unsigned int [a-zA-Z0-9_]*_len/unsigned int embed_len/' \
+            > embed.gen.h", embed));
+        println!("{:?}", cmd);
+        let output = cmd.output()?;
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    }
 
     let p1 = include_str!("../../../stub/stub-p1.c");
     let p2 = include_str!("../../../stub/stub-p2.c");
@@ -93,12 +112,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     genfile.flush()?;
     println!("stub written to stub.gen.c");
 
-    println!("gcc -nostdlib -nostartfiles -include {} \
-        -static -Os -fcf-protection=none -fdiagnostics-color=always \
-        -Wl,--gc-sections -Wl,--strip-all -Wl,--build-id=none -Wl,-T{} \
-        stub.gen.c -o stub.out", NOLIBC_PATH, LDSCRIPT_PATH);
-    let output = Command::new("gcc")
-        .arg("-nostdlib")
+    let mut cmd = Command::new("gcc");
+    cmd.arg("-nostdlib")
         .arg("-nostartfiles")
         .arg("-include")
         .arg(NOLIBC_PATH)
@@ -112,18 +127,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         .arg(format!("-Wl,-T{}", LDSCRIPT_PATH))
         .arg("stub.gen.c")
         .arg("-o")
-        .arg("stub.out")
-        .output()?;
-    println!("{}", String::from_utf8_lossy(&output.stdout));
+        .arg("stub.out");
+    println!("{:?}", cmd);
+    let output = cmd.output()?;
     eprintln!("{}", String::from_utf8_lossy(&output.stderr));
     if !output.status.success() {
         return Err("failed to compile stub.gen.c".into());
     }
-    let output = Command::new("objcopy")
+    // see stub/Makefile for reasoning on why this isn't enabled
+    /*let output = Command::new("objcopy")
         .arg("--strip-section-headers")
         .arg("stub.out")
         .output()?;
     if !output.status.success() {
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    }*/
+    if is_embed {
+        let mut cmd = Command::new("rm");
+        cmd.arg("-f")
+            .arg("embed.gen.h");
+        println!("{:?}", cmd);
+        let output = cmd.output()?;
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
     }
     println!("{}", "stub successfully generated".bright_green());
