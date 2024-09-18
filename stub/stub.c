@@ -273,13 +273,14 @@ int main(int argc, char **argv, char **envp)
 			exit(1);
 		}
 	#else
-		#include "embed.gen.h"
+		extern char _binary_embed_gen_tmp_start[];
+		extern char _binary_embed_gen_tmp_end[];
 		int fd = memfd_create("embed", 0);
-		write(fd, embed, embed_len);
+		write(fd, _binary_embed_gen_tmp_start,
+			(unsigned long)&_binary_embed_gen_tmp_end-(unsigned long)&_binary_embed_gen_tmp_start);
 
-		if (INIT_AFTER_ENTRY) {
-			entry = *(unsigned long*)(embed+24);
-		}
+		if (INIT_AFTER_ENTRY)
+			entry = *(unsigned long*)((char*)(_binary_embed_gen_tmp_start)+24);
 
 		pid_t pid = fork();
 		if (!pid) {

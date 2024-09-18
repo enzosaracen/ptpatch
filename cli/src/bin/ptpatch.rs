@@ -33,6 +33,21 @@ struct ParsedFile {
     patches: Vec<Patch>,
 }
 
+fn run_command(base: &str, args: &[&str], err: &str) -> Result<(), Box<dyn Error>> {
+    let mut cmd = Command::new(base);
+    cmd.args(args);
+
+    println!("{:?}", cmd);
+    let output = cmd.output()?;
+
+    if !output.status.success() {
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        return Err(err.into());
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
     let mut hookcnt = 0;
@@ -84,19 +99,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let mut is_embed = false;
     if let Some(embed) = &opt.embed {
-        Path::new(embed).canonicalize()?;
         is_embed = true;
-        // could do this with ld to avoid some build overhead, but this is easier
+        Path::new(embed).canonicalize()?;
         hook_str.insert_str(0, "#define EMBED_EXECUTABLE\n");
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg(format!("xxd -i {} | \
-            sed -e 's/unsigned char [a-zA-Z0-9_]*\\[\\]/unsigned char embed[]/' \
-            -e 's/unsigned int [a-zA-Z0-9_]*_len/unsigned int embed_len/' \
-            > embed.gen.h", embed));
-        println!("{:?}", cmd);
-        let output = cmd.output()?;
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        run_command(
+            "cp",
+            &[embed, "embed.gen.tmp"],
+            &format!("failed to copy {} to embed.gen.tmp", embed),
+        )?;
+        run_command(
+            "ld",
+            &["-r", "-b", "binary", "-o", "embed.gen.o", "embed.gen.tmp"],
+            "linker failed to generate embed.gen.o",
+        )?;
     }
 
     let p1 = include_str!("../../../stub/stub-p1.c");
@@ -112,45 +127,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     genfile.flush()?;
     println!("stub written to stub.gen.c");
 
-    let mut cmd = Command::new("gcc");
-    cmd.arg("-nostdlib")
-        .arg("-nostartfiles")
-        .arg("-include")
-        .arg(NOLIBC_PATH)
-        .arg("-static")
-        .arg("-Os")
-        .arg("-fcf-protection=none")
-        .arg("-fdiagnostics-color=always")
-        .arg("-Wl,--gc-sections")
-        .arg("-Wl,--strip-all")
-        .arg("-Wl,--build-id=none")
-        .arg(format!("-Wl,-T{}", LDSCRIPT_PATH))
-        .arg("stub.gen.c")
-        .arg("-o")
-        .arg("stub.out");
-    println!("{:?}", cmd);
-    let output = cmd.output()?;
-    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-    if !output.status.success() {
-        return Err("failed to compile stub.gen.c".into());
-    }
+    run_command(
+        "gcc",
+        &[
+            "-nostdlib", "-nostartfiles", "-include", NOLIBC_PATH, "-static",
+            "-Os", "-fcf-protection=none", "-fdiagnostics-color=always", "-Wl,--gc-sections",
+            "-Wl,--strip-all", "-Wl,--build-id=none", &format!("-Wl,-T{}", LDSCRIPT_PATH),
+            "stub.gen.c", if is_embed { "embed.gen.o" } else { "-Os" }, "-o", "stub.out",
+        ],
+        "failed to compile stub.gen.c",
+    )?;
     // see stub/Makefile for reasoning on why this isn't enabled
-    /*let output = Command::new("objcopy")
-        .arg("--strip-section-headers")
-        .arg("stub.out")
-        .output()?;
-    if !output.status.success() {
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-    }*/
+    /*run_command(
+        "objcopy",
+        &["--strip-section-headers", "stub.out"],
+        "failed to strip section headers from stub.out",
+    )?;*/
     if is_embed {
-        let mut cmd = Command::new("rm");
-        cmd.arg("-f")
-            .arg("embed.gen.h");
-        println!("{:?}", cmd);
-        let output = cmd.output()?;
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        run_command(
+            "rm",
+            &["-f", "embed.gen.tmp", "embed.gen.o"],
+            "failed to remove embed.gen.tmp and embed.gen.o",
+        )?;
     }
     println!("{}", "stub successfully generated".bright_green());
+
     Ok(())
 }
 

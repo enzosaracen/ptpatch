@@ -9,13 +9,14 @@ The `ptpatch` CLI accepts one or more patch file arguments in the [custom format
 ```
 ptpatch [options] [patch_files ...]
 ```
-The file `stub.gen.c` will be generated and automatically compiled to `stub.out`.
-By default, `stub.out` will be isolated, so it can be run with any executable by specifying its path as the first argument.
+The `stub.gen.c` file will be generated and automatically compiled to `stub.out`.
+By default, `stub.out` will be isolated, meaning it can be run with any executable by specifying its path as the first argument.
 ```
 ./stub.out /path/to/exe [args_for_exe ...]
 ```
 The `--embed` or `-e` option takes a single executable file argument and embeds its contents into `stub.out`,
 causing `stub.out` to always run that executable.
+The size of stubs and thus overhead from embedding them is usually below 0x400 bytes.
 
 ## Format
 Patch files combine C code with special markers to define a series of hook functions. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
@@ -33,7 +34,7 @@ Patch files combine C code with special markers to define a series of hook funct
  %%
  ```
 
-3. **hooks**: C code enclosed by `<@` and `@>` with a specified breakpoint after `<@` and on the same line
+3. **hooks**: C code enclosed by `<@` and `@>` with a specified breakpoint on the same line after `<@`
 
  ```c
  <@ breakpoint
@@ -43,7 +44,7 @@ Patch files combine C code with special markers to define a series of hook funct
 
 The different breakpoint types are defined as follows.
 
-- **address-based**: executes whenever PC reaches the address, specified as a C expression
+- **address-based**: executes whenever PC reaches the address, specified by a C expression
     ```c
     <@ base+0x1234
         // code to execute each time we hit base+0x1234
