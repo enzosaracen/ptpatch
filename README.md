@@ -16,7 +16,7 @@ By default, `stub.out` will be isolated, meaning it can be run with any executab
 ```
 The `--embed` or `-e` option takes a single executable file argument and embeds its contents into `stub.out`,
 causing `stub.out` to always run that executable.
-The size of stubs and thus overhead from embedding them is usually below 0x400 bytes.
+The size of stubs and thus overhead from embedding them is usually below 0x2800 bytes.
 
 ## Format
 Patch files combine C code with special markers to define a series of hook functions. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
