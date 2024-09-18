@@ -9,14 +9,14 @@ The `ptpatch` CLI accepts one or more patch file arguments in the [custom format
 ```
 ptpatch [options] [patch_files ...]
 ```
-The `stub.gen.c` file will be generated and automatically compiled to `stub.out`.
+A `stub.gen.c` file will be generated and automatically compiled to `stub.out`.
 By default, `stub.out` will be isolated, meaning it can be run with any executable by specifying its path as the first argument.
 ```
 ./stub.out /path/to/exe [args_for_exe ...]
 ```
 The `--embed` or `-e` option takes a single executable file argument and embeds its contents into `stub.out`,
 causing `stub.out` to always run that executable.
-The size of stubs and thus overhead from embedding them is usually below 0x2800 bytes.
+The size of stubs and thus overhead of embedding is usually below 0x2800 bytes.
 
 ## Format
 Patch files combine C code with special markers to define a series of hook functions. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
