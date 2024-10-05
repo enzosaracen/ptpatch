@@ -1,5 +1,5 @@
 # ptpatch
-`ptpatch` is a tool for patching Linux executables with a ptracing stub to inspect and modify the executable's behavior at runtime. Patches are defined by a series of hook functions written in C with full control over the executable's registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
+`ptpatch` is a tool for patching Linux executables with a ptracing stub to inspect and modify behavior at runtime. Patches are defined by a series of hook functions written in C with full control over the process's registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
 
 ## Installation
 Run `./install.sh`. `cargo` and `gcc` are required.
