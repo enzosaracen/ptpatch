@@ -18,7 +18,7 @@ The `--embed` or `-e` option takes a single executable file argument and embeds 
 causing `stub.out` to always run that executable.
 The size of stubs and thus overhead of embedding is usually below 0x2800 bytes.
 
-See some [example uses of ptpatch here.](examples/README.md)
+See some [example uses of ptpatch here.](examples)
 
 ## Format
 Patch files combine C code with special markers to define a series of hook functions. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
@@ -103,7 +103,7 @@ long saved_rdx;
 @>
 ```
 
-[More examples here.](examples/README.md)
+[More examples here.](examples)
 
 ## Notes
 This doesn't work well by default for multithreaded programs or anything that forks.
