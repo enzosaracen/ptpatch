@@ -1,0 +1,44 @@
+int bf_byte = 1;
+int flag_pos = 0;
+char flag[0x100];
+char saved_buf[0x10];
+
+%%
+
+// index in $rbx
+// input[index] byte in $rsi
+// checked buffer with 0x10 bytes in $rbp
+// target value in $base+0x4020+i*0x10
+
+// so we bruteforce with all possible byte values
+// until memcmp($rbp, $base+0x4020+i*0x10) == 0
+// repeat 49 times for the full flag
+// make sure to backtrack the state in $rbp
+
+// after byte is set in $rsi
+<@ base+0x1a0d
+	mem_write(regs.rbp, saved_buf, 0x10);
+	if (bf_byte > 255) {
+		puts("something went wrong, bf_byte exceeded 255");
+		exit(1);
+	}
+	regs.rsi = bf_byte++;
+@>
+
+// after update is called (checked buffer generated)
+<@ base+0x1a18
+	char buf[0x10], target[0x10];
+	mem_read(base+0x4020+regs.rbx*0x10, target, 0x10);
+	mem_read(regs.rbp, buf, 0x10);
+	// need to try again, so reset pc to before the call
+	if (memcmp(buf, target, 0x10) != 0) {
+		regs.rip = base+0x1a08;
+		return;
+	}
+	printf("found valid byte: '%c' at pos: %d\n", bf_byte-1, flag_pos);
+	flag[flag_pos] = bf_byte-1;
+	printf("flag so far: %s\n", flag);
+	mem_read(regs.rbp, saved_buf, 0x10);
+	flag_pos += 1;
+	bf_byte = 0;
+@>
