@@ -18,7 +18,7 @@ if (correct == 0)
     puts("Wrong...")
 ```
 
-For each of the 0x31 characters sent in the input buffer, some persistent memory at `state` is updated by `update` using our character. After each update, `state` is compared with some predefined bytes in `table`, and if they ever compare as not equal, `correct` will be set to false meaning our flag is wrong. The `update` function itself is difficult to reverse, but because only one character is checked at a time, we can bruteforce byte by byte.
+For each of the 0x31 characters sent in the input buffer, some persistent memory at `state` is updated by `update` using our character. After each update, `state` is checked to be equal to some predefined bytes in `table`. The `update` function itself is difficult to reverse, but because only one character is checked at a time, we can bruteforce byte by byte.
 
 The high-level logic for performing the bruteforce is as follows:
 1. save the current `state` in some external memory
