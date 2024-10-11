@@ -18,18 +18,18 @@ if (correct == 0)
     puts("Wrong...")
 ```
 
-For each of the 0x31 characters sent in the input buffer, some persistent memory at `state` is updated by `update` using our character. After each update, the state is compared with some predefined bytes in `table`, and if they ever compare as not equal, `correct` will be set to false meaning our flag is wrong. The `update` function itself is difficult to reverse, but because only one character is checked at a time, we can brute force byte by byte.
+For each of the 0x31 characters sent in the input buffer, some persistent memory at `state` is updated by `update` using our character. After each update, `state` is compared with some predefined bytes in `table`, and if they ever compare as not equal, `correct` will be set to false meaning our flag is wrong. The `update` function itself is difficult to reverse, but because only one character is checked at a time, we can bruteforce byte by byte.
 
 The high-level logic for performing the bruteforce is as follows:
-    0) save the current `state` in some external memory
-    1) set *(&buf + i) to the byte we are testing before `update` is called
-    2) if the memcmp returns 0, we found the correct character, let the loop advance and repeat this process
-    3) else, roll back `state` to the saved version, jump back to before the `update` call, and repeat the process with a new character
+1. save the current `state` in some external memory
+2. set *(&buf + i) to the byte we are testing before `update` is called
+3. if the memcmp returns 0, we found the correct character, let the loop advance and repeat this process
+4. else, roll back `state` to the saved version, jump back to before the `update` call, and repeat the process with a new character
 
-There are likely a variety of ways to implement this, but I chose to use my tool `ptpatch` which lets you patch a binary with a stub that uses ptrace to modify the original binary's behavior at runtime. Further description of this tool and its code can be found here: [github.com/enzosaracen/ptpatch](https://github.com/enzosaracen/ptpatch).
+There are likely a variety of ways to implement this, but I chose to use [ptpatch](https://github.com/enzosaracen/ptpatch).
 
 We can define a ptpatch patch file that will modify the `checker` binary to solve itself as it runs.
-The contents of the, patch file, `patch.ptp` is provided below with comments.
+The contents of `patch.ptp` is provided below with comments.
 
 ```c
 int bf_byte = 1;
@@ -80,7 +80,7 @@ char saved_buf[0x10];
 
 We can then run `ptpatch patch.ptp -e checker`.
 A file `stub.out` will be generated, which is the `checker` binary embedded with the ptracing stub.
-Simply running it and pressing enter to get past the fgets will cause the flag to be printed out.
+Simply running it and pressing enter will cause the flag to be printed out.
 
 ```
 ➜  ./stub.out
