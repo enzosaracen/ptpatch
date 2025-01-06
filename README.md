@@ -67,13 +67,21 @@ The different breakpoint types are defined as follows.
       // inspect or modify return values
     @>
     ```
+- **fork**: executes when a tracee triggers a fork, vfork, or clone. the new child pid will be stored in a local variable `child`. setting the local variable `should_trace` to `0` will prevent the child from being traced. the default behavior is to only stop the tracer when the initial tracee exits. caution: if using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. this can be fixed by resetting breakpoints on detach, but I haven't implemented this yet
+    ```c
+    <@ fork
+      // inspect or modify state, decide on whether to trace child
+      if (regs.r15 == 0x42 || child == 69420)
+          should_trace = 0;
+    @>
+    ```
 
 The code within each hook has access to the following predefined variables and functions.
 
 - `pid`: pid of the tracee
 - `regs`: struct `user_regs_struct` representing the current register state, modifications will be applied to the tracee after the hook returns
-- `mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`
-- `mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`
+- `int mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`, return `0` on success
+- `int mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`, return `0` on success
 
 **Example**
 ```c

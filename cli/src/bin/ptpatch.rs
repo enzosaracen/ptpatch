@@ -21,6 +21,7 @@ enum Breakpoint {
     Expr(String),
     Presys(Vec<String>),
     Postsys(Vec<String>),
+    Fork(),
 }
 
 struct Patch {
@@ -53,6 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut hookcnt = 0;
     let mut hook_str = String::new();
     let mut init_str = String::new();
+    let mut seen_fork = false;
 
     let mut hook_sys = false;
 
@@ -61,6 +63,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         let parsed = parse_file(&content)?;
         hook_str.push_str(&parsed.globals);
         for patch in parsed.patches {
+            if let Breakpoint::Fork() = patch.breakpoint {
+                if !seen_fork {
+                    hook_str.push_str(&format!(
+                        "int fork_handle(int pid, int child){{int should_trace = 1;struct user_regs_struct regs;ptrace_getregs(pid, &regs);ptrace_setregs(pid, &regs);\n{}\nreturn should_trace;}}",
+                        patch.body));
+                    seen_fork = true;
+                }
+                continue;
+            }
             hook_str.push_str(&format!(
                 "void hook{}(pid_t pid, void *arg)\n{{\n\t#define regs (*(struct user_regs_struct *)\
                 arg)\n\tcur_pid = pid;\n{}\n\t#undef regs\n}}\n",
@@ -89,11 +100,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         init_str.push_str(&format!("\tpostsys_hooks[{}] = hook{};\n", arg, hookcnt));
                     }
                 },
+                _ => {},
             }
             hookcnt += 1;
         }
     }
-    
+
+    if !seen_fork {
+        hook_str.push_str("int fork_handle(int pid, int child){return 1;}");
+    }
     if hook_sys {
         hook_str.insert_str(0, "#define HOOK_SYSCALLS\n");
     }
@@ -223,7 +238,8 @@ fn parse_breakpoint(line: &str) -> Result<Breakpoint, Box<dyn Error>> {
             .map(|s| s.trim().to_string())
             .collect::<Vec<String>>();
         return Ok(Breakpoint::Presys(names));
-    } else if line.starts_with("post-syscall") {
+    }
+    if line.starts_with("post-syscall") {
         let rest = line.strip_prefix("post-syscall").ok_or("invalid post-syscall format")?.trim();
         if rest.is_empty() {
             return Err("post-syscall must be followed by a list of syscall names or numbers".into());
@@ -232,10 +248,12 @@ fn parse_breakpoint(line: &str) -> Result<Breakpoint, Box<dyn Error>> {
             .map(|s| s.trim().to_string())
             .collect::<Vec<String>>();
         return Ok(Breakpoint::Postsys(names));
-    } else {
-        if line.is_empty() {
-            return Err("breakpoint expression cannot be empty".into());
-        }
-        return Ok(Breakpoint::Expr(line.to_string()));
     }
+    if line.starts_with("fork") {
+        return Ok(Breakpoint::Fork());
+    }
+    if line.is_empty() {
+        return Err("breakpoint expression cannot be empty".into());
+    }
+    Ok(Breakpoint::Expr(line.to_string()))
 }

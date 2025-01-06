@@ -11,6 +11,15 @@
 #define PTRACE_O_TRACEVFORKDONE 0x20
 #define PTRACE_O_TRACEEXIT      0x40
 #define PTRACE_O_TRACESECCOMP   0x80
+#define PTRACE_EVENT_FORK	1
+#define PTRACE_EVENT_VFORK	2
+#define PTRACE_EVENT_CLONE	3
+#define PTRACE_EVENT_EXEC	4
+#define PTRACE_EVENT_VFORK_DONE	5
+#define PTRACE_EVENT_EXIT	6
+#define PTRACE_EVENT_SECCOMP	7
+#define PTRACE_EVENT_STOP	128
+
 
 enum __ptrace_request
 {
@@ -185,7 +194,33 @@ int bkpt_handle(pid_t pid)
 void (*presys_hooks[MAX_SYSNR])(pid_t, void *);
 void (*postsys_hooks[MAX_SYSNR])(pid_t, void *);
 
-int last_was_entry = 0;
+#define MAX_ENTRY 1024
+struct Htab {
+	int pid;
+	int entry;
+	struct Htab *next;
+} entry_table[MAX_ENTRY];
+
+int entry_lookup(int pid)
+{
+	int idx = pid % MAX_ENTRY;
+	struct Htab *p = &entry_table[idx];
+	for(;;) {
+		if (p->pid == pid) {
+			int ret = p->entry;
+			p->entry = !p->entry;
+			return ret;
+		}
+		if (!p->next)
+			break;
+		p = p->next;
+	}
+	p->next = malloc(sizeof(struct Htab));
+	p->next->pid = pid;
+	p->next->entry = 1;
+	p->next->next = 0;
+	return 0;
+}
 
 void sys_handle(pid_t pid)
 {
@@ -193,14 +228,13 @@ void sys_handle(pid_t pid)
 	ptrace_getregs(pid, &regs);
 	int nr = regs.orig_rax;
 	if (nr >= 0 && nr < MAX_SYSNR) {
-		if (last_was_entry) {
-			if (postsys_hooks[nr])
+		if (entry_lookup(pid)) {
+			if (postsys_hooks[nr]) 
 				postsys_hooks[nr](pid, &regs);
 		} else if (presys_hooks[nr])
 			presys_hooks[nr](pid, &regs);
 	}
 	ptrace_setregs(pid, &regs);
-	last_was_entry = !last_was_entry;
 }
 
 int cur_pid = 0;
@@ -246,6 +280,8 @@ int mem_read(char *addr, char *buf, int n)
 	}
 	return 0;
 }
+
+int fork_handle(int pid, int child);
 
 // add hooks here
 
@@ -317,12 +353,14 @@ int main(int argc, char **argv, char **envp)
 			exit(1);
 	}
 
+	int flags = PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE;
 	#ifdef HOOK_SYSCALLS
 		#define RESUME ptrace_syscall
-		ptrace_setoptions(pid, PTRACE_O_TRACESYSGOOD);
+		flags |= PTRACE_O_TRACESYSGOOD;
 	#else
 		#define RESUME ptrace_cont
 	#endif
+	ptrace_setoptions(pid, flags);
 
 	// add breakpoints here
 
@@ -331,18 +369,35 @@ int main(int argc, char **argv, char **envp)
 
 	RESUME(pid);
 	for(;;) {
-		waitpid(pid, &status, 0);
-		int is_syscall = status & 0x8000;
-		status = status & ~0x8000;
-		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
-			if (is_syscall)
-				sys_handle(pid);
-			else
-				bkpt_handle(pid);
-			RESUME(pid);
-		} else  {
+		int this_pid = waitpid(-1, &status, 0);
+		if (WIFSTOPPED(status)) {
+			switch(WEXITSTATUS(status)) {
+			case SIGTRAP:
+				switch (status >> 16) {
+				case PTRACE_EVENT_FORK:
+				case PTRACE_EVENT_VFORK:
+				case PTRACE_EVENT_CLONE:
+					int child;
+					ptrace(PTRACE_GETEVENTMSG, this_pid, 0, &child);
+					struct user_regs_struct regs;
+					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
+					if (fork_handle(pid, child))
+						ptrace_setoptions(child, flags);
+					else
+						ptrace(PTRACE_DETACH, child, 0, 0);
+					RESUME(child);
+					break;
+				default:
+					bkpt_handle(this_pid);
+				}
+				break;
+			case SIGTRAP|0x80:
+				sys_handle(this_pid);
+				break;
+			}
+			RESUME(this_pid);
+		} else if (this_pid == pid)
 			break;
-		}
 	}
 	return 0;
 }
