@@ -44,6 +44,13 @@ Patch files combine C code with special markers to define a series of hook funct
  @>
  ```
 
+The code within each hook has access to the following predefined variables and functions.
+
+- `pid`: pid of the tracee
+- `regs`: struct `user_regs_struct` representing the current register state, modifications will be applied to the tracee after the hook returns
+- `int mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`, return `0` on success
+- `int mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`, return `0` on success
+
 The different breakpoint types are defined as follows.
 
 - **address-based**: executes whenever PC reaches the address, specified by a C expression
@@ -70,7 +77,7 @@ The different breakpoint types are defined as follows.
 - **fork**: executes when a tracee triggers a fork, vfork, or clone. the new child pid will be stored in a local variable `child`. setting the local variable `should_trace` to `0` will prevent the child from being traced. `regs` for the parent is available to modify as usual, but `child_regs` is also available for registers of the new child. `mem_write` and `mem_read` will operate on the parent by default, but can be switched to the child by setting the global variable `cur_pid` to the child's pid. caution: if using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. this can be fixed by resetting breakpoints on detach, but it's not yet implemented
     ```c
     <@ fork
-      // inspect or modify state, decide on whether to trace child
+      // inspect or modify state, decide whether to trace child
       if (regs.r15 == 0x42 || child == 69420)
           should_trace = 0;
       else
@@ -78,14 +85,8 @@ The different breakpoint types are defined as follows.
     @>
     ```
 
-The code within each hook has access to the following predefined variables and functions.
-
-- `pid`: pid of the tracee
-- `regs`: struct `user_regs_struct` representing the current register state, modifications will be applied to the tracee after the hook returns
-- `int mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`, return `0` on success
-- `int mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`, return `0` on success
-
 **Exiting**
+
 The tracer will exit upon receiving an unhandled status while waiting on a process with pid equal to the global variable `focus_pid`. `focus_pid` is set to the original process's pid by default, so children exiting will not cause the tracer to exit. `focus_pid` can be changed from within a hook function. If `focus_pid` is set to `-1`, an unhandled status from any process will cause the tracer to exit. Additionally, the global variable `exit_now` can be set to `1` from within a hook to immediately exit the tracer. There is currently no support to set muliple different pids as focuses.
 
 **Example**
