@@ -20,7 +20,6 @@
 #define PTRACE_EVENT_SECCOMP	7
 #define PTRACE_EVENT_STOP	128
 
-
 enum __ptrace_request
 {
 	PTRACE_TRACEME = 0,
@@ -74,8 +73,10 @@ long ptrace(enum __ptrace_request request, pid_t pid, void *addr, void *data)
 long ptrace_peektext(pid_t pid, void *addr)
 {
 	long data;
-	if (ptrace(PTRACE_PEEKTEXT, pid, addr, &data) < 0)
+	if (ptrace(PTRACE_PEEKTEXT, pid, addr, &data) < 0) {
+		puts("peektext error");
 		exit(1);
+	}
 	return data;
 }
 
@@ -87,50 +88,66 @@ int ptrace_testtext(pid_t pid, void *addr)
 
 void ptrace_poketext(pid_t pid, void *addr, long data)
 {
-	if (ptrace(PTRACE_POKETEXT, pid, addr, (void*)data) < 0)
+	if (ptrace(PTRACE_POKETEXT, pid, addr, (void*)data) < 0) {
+		puts("poketext error");
 		exit(1);
+	}
 }
 
 void ptrace_getregs(pid_t pid, struct user_regs_struct *regs)
 {
-	if (ptrace(PTRACE_GETREGS, pid, 0, regs) < 0)
+	if (ptrace(PTRACE_GETREGS, pid, 0, regs) < 0) {
+		puts("poketext error");
 		exit(1);
+	}
 }
 
 void ptrace_setregs(pid_t pid, struct user_regs_struct *regs)
 {
-	if (ptrace(PTRACE_SETREGS, pid, 0, regs) < 0)
+	if (ptrace(PTRACE_SETREGS, pid, 0, regs) < 0) {
+		puts("setregs error");
 		exit(1);
+	}
 }
 
 void ptrace_cont(pid_t pid)
 {
-	if (ptrace(PTRACE_CONT, pid, 0, 0) < 0)
+	if (ptrace(PTRACE_CONT, pid, 0, 0) < 0) {
+		puts("cont error");
 		exit(1);
+	}
 }
 
 void ptrace_syscall(pid_t pid)
 {
-	if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
+	if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0) {
+		puts("syscall error");
 		exit(1);
+	}
 }
 
 void ptrace_traceme(void)
 {
-	if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0)
+	if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) {
+		puts("traceme error");
 		exit(1);
+	}
 }
 
 void ptrace_singlestep(pid_t pid)
 {
-	if (ptrace(PTRACE_SINGLESTEP, pid, 0, 0) < 0)
+	if (ptrace(PTRACE_SINGLESTEP, pid, 0, 0) < 0) {
+		puts("singlestep error");
 		exit(1);
+	}
 }
 
 void ptrace_setoptions(pid_t pid, long data)
 {
-	if (ptrace(PTRACE_SETOPTIONS, pid, 0, (void*)data) < 0)
+	if (ptrace(PTRACE_SETOPTIONS, pid, 0, (void*)data) < 0) {
+		puts("setoptions error");
 		exit(1);
+	}
 }
 
 struct Breakpoint {
@@ -151,8 +168,10 @@ int bkpt_add(pid_t pid, void *addr, void (*hook)(pid_t, void *))
 	if (bkpt_cnt >= MAX_BKPTS)
 		return -1;
 	for (int i = 0; i < bkpt_cnt; i++)
-		if (bkpt_tab[i].addr == addr)
+		if (bkpt_tab[i].addr == addr) {
+			puts("duplicate breakpoint error");
 			exit(1);
+		}
 	bkpt_tab[bkpt_cnt].pid = pid;
 	bkpt_tab[bkpt_cnt].addr = addr;
 	bkpt_tab[bkpt_cnt].hook = hook;
@@ -237,8 +256,8 @@ void sys_handle(pid_t pid)
 	ptrace_setregs(pid, &regs);
 }
 
-int cur_pid = 0;
-unsigned long base = 0;
+int cur_pid, focus_pid, exit_now;
+unsigned long base;
 
 int mem_write(char *addr, char *buf, int n)
 {
@@ -366,9 +385,10 @@ int main(int argc, char **argv, char **envp)
 
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);
-
+	
+	focus_pid = pid;
 	RESUME(pid);
-	for(;;) {
+	while (!exit_now) {
 		int this_pid = waitpid(-1, &status, 0);
 		if (WIFSTOPPED(status)) {
 			switch(WEXITSTATUS(status)) {
@@ -381,6 +401,7 @@ int main(int argc, char **argv, char **envp)
 					ptrace(PTRACE_GETEVENTMSG, this_pid, 0, &child);
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
+					cur_pid = pid;
 					if (fork_handle(pid, child))
 						ptrace_setoptions(child, flags);
 					else
@@ -396,7 +417,7 @@ int main(int argc, char **argv, char **envp)
 				break;
 			}
 			RESUME(this_pid);
-		} else if (this_pid == pid)
+		} else if (this_pid == focus_pid || focus_pid == -1)
 			break;
 	}
 	return 0;

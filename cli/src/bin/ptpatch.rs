@@ -66,7 +66,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Breakpoint::Fork() = patch.breakpoint {
                 if !seen_fork {
                     hook_str.push_str(&format!(
-                        "int fork_handle(int pid, int child){{int should_trace = 1;struct user_regs_struct regs;ptrace_getregs(pid, &regs);ptrace_setregs(pid, &regs);\n{}\nreturn should_trace;}}",
+                        "int fork_handle(int pid, int child){{int should_trace = 1;struct user_regs_struct regs, child_regs;ptrace_getregs(pid, &regs);ptrace_getregs(child, &child_regs);\n{}\nptrace_setregs(pid, &regs);ptrace_setregs(child, &child_regs);return should_trace;}}",
                         patch.body));
                     seen_fork = true;
                 }
