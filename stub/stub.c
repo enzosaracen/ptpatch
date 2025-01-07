@@ -381,7 +381,7 @@ int fork_handle_wrapper(int pid, int child)
 void status_handle_wrapper(int pid, int status)
 {
 	struct user_regs_struct regs;
-	int is_regs = ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
+	int is_regs = !WIFEXITED(status) && ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
 	should_detach = !is_regs;
 	status_handle(pid, status, &regs, is_regs);
 	if (is_regs)
@@ -512,15 +512,14 @@ int main(int argc, char **argv, char **envp)
 				status_handle_wrapper(cur_pid, status);
 			#else
 				struct user_regs_struct regs;
-				should_detach = ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0;
+				should_detach = WIFEXITED(status) || ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0;
 			#endif
 		}
 		if (should_detach) {
 			if (cur_pid == focus_pid)
 				break;
 			ptrace_detach(cur_pid);
-		}
-		else if (!pid_is_paused(cur_pid))
+		} else if (!pid_is_paused(cur_pid))
 			RESUME(cur_pid);
 	}
 	return 0;

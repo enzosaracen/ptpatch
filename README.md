@@ -89,7 +89,7 @@ The different breakpoint types are defined as follows.
             child_regs.r15 = 0x100;
     @>
     ```
-- **status**: executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall). the status is available within the local variable `status`. `regs` will try to be gathered for inspecting/modifying, however, it is likely this will fail due to the process having exited, so before accessing `regs`, check the local variable `is_regs` which will be set to `1` if `regs` is usable. the `should_detach` global will be set to the value of `!is_regs` by default, meaning unless overridden, the tracer will detach from the tracee that triggered the status if regs is not accessible
+- **status**: executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall). the status is available within the local variable `status`. `regs` will try to be gathered for inspecting/modifying, however, it is likely this will fail due to the process having exited, so before accessing `regs`, check the local variable `is_regs` which will be set to `1` if `regs` is usable and the process has not exited. the `should_detach` global will be set to the value of `!is_regs` by default, meaning unless overridden, the tracer will detach from the tracee that triggered the status if regs is not accessible
     ```c
     <@ status
         // inspect or modify state, decide whether to exit the tracer based on status
