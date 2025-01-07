@@ -17,6 +17,9 @@ By default, `stub.out` will be isolated, meaning it can be run with any executab
 The `--embed` or `-e` option to `ptpatch` takes a single executable file argument and embeds its contents into `stub.out`,
 causing `stub.out` to always run that executable.
 The size of stubs and thus overhead of embedding is usually below 0x2800 bytes.
+```
+ptpatch patch.ptp -e binary
+```
 
 See some [example uses of ptpatch here.](examples)
 
