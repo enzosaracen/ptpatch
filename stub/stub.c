@@ -1,5 +1,4 @@
 #include <sys/user.h>
-#include <sys/personality.h>
 
 #define PTRACE_O_TRACESYSGOOD   0x01
 #define PTRACE_O_TRACEFORK      0x02
@@ -63,10 +62,9 @@ enum __ptrace_request
 	PTRACE_GET_RSEQ_CONFIGURATION = 0x420f
 };
 
-void err(char *s)
-{
-	printf("error: %s", s);
-	exit(1);
+#define err(s) { \
+	printf("%s:%d: error: %s\n",  __FILE__, __LINE__, s); \
+	exit(1); \
 }
 
 long ptrace(enum __ptrace_request request, int pid, void *addr, void *data)
@@ -136,6 +134,15 @@ void ptrace_setoptions(int pid, long data)
 		err("setoptions");
 }
 
+#ifdef HOOK_SYSCALLS
+#define RESUME ptrace_syscall
+#else
+#define RESUME ptrace_cont
+#endif
+
+int cur_pid, focus_pid, exit_now, should_detach;
+unsigned long base;
+
 struct Breakpoint {
 	int idx;
 	int pid;
@@ -195,53 +202,58 @@ int bkpt_handle(int pid)
 void (*presys_hooks[MAX_SYSNR])(int, void *);
 void (*postsys_hooks[MAX_SYSNR])(int, void *);
 
-#define MAX_ENTRY 1024
-struct Htab {
+#define MAX_PIDTAB 1024
+struct pidtab {
 	int pid;
-	int entry;
-	struct Htab *next;
-} entry_table[MAX_ENTRY];
+	int val;
+	struct pidtab *next;
+} entry_tab[MAX_PIDTAB], pause_tab[MAX_PIDTAB];
 
-int entry_lookup(int pid)
+enum pidtab_op {
+	PIDTAB_TOGGLE,
+	PIDTAB_SET,
+	PIDTAB_NOP,
+};
+
+int pidtab_lookup(struct pidtab *tab, int pid, enum pidtab_op op, int val)
 {
-	struct Htab *p = &entry_table[pid % MAX_ENTRY];
+	struct pidtab *p = &tab[pid % MAX_PIDTAB];
 	for(;;) {
 		if (p->pid == pid) {
-			int ret = p->entry;
-			p->entry = !p->entry;
+			int ret = p->val;
+			if (op == PIDTAB_TOGGLE)
+				p->val = !p->val;
+			else if (op == PIDTAB_SET)
+				p->val = val;
 			return ret;
 		}
 		if (!p->next)
 			break;
 		p = p->next;
 	}
-	p->next = malloc(sizeof(struct Htab));
+	p->next = malloc(sizeof(struct pidtab));
 	p->next->pid = pid;
-	p->next->entry = 1;
+	p->next->val = val;
 	p->next->next = 0;
 	return 0;
 }
 
-void ptrace_detach(int pid)
+void pidtab_delete(struct pidtab *tab, int pid)
 {
-	ptrace(PTRACE_DETACH, pid, 0, 0);
-	struct Htab *p = &entry_table[pid % MAX_ENTRY], *prev = 0;
+	struct pidtab *p = &tab[pid % MAX_PIDTAB], *prev = 0;
     if (p->pid == pid) {
         if (p->next) {
-            struct Htab *tmp = p->next;
+            struct pidtab *tmp = p->next;
             *p = *tmp;
             free(tmp);
-        } else {
+        } else
             p->pid = 0;
-            p->entry = 0;
-        }
         return;
     }
     while (p) {
         if (p->pid == pid) {
-            if (prev) {
+            if (prev)
                 prev->next = p->next;
-            }
             free(p);
             return;
         }
@@ -250,13 +262,37 @@ void ptrace_detach(int pid)
     }
 }
 
+void pid_pause(int pid)
+{
+	pidtab_lookup(pause_tab, pid, PIDTAB_SET, 1);
+}
+
+void pid_unpause(int pid)
+{
+	pidtab_lookup(pause_tab, pid, PIDTAB_SET, 0);
+	if (pid != cur_pid)
+		RESUME(pid);
+}
+
+int pid_is_paused(int pid)
+{
+	return pidtab_lookup(pause_tab, pid, PIDTAB_NOP, 0);
+}
+
+void ptrace_detach(int pid)
+{
+	ptrace(PTRACE_DETACH, pid, 0, 0);
+	pidtab_delete(entry_tab, pid);
+	pidtab_delete(pause_tab, pid);
+}
+
 void sys_handle(int pid)
 {
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
 	int nr = regs.orig_rax;
 	if (nr >= 0 && nr < MAX_SYSNR) {
-		if (entry_lookup(pid)) {
+		if (pidtab_lookup(entry_tab, pid, PIDTAB_TOGGLE, 1)) {
 			if (postsys_hooks[nr]) 
 				postsys_hooks[nr](pid, &regs);
 		} else if (presys_hooks[nr])
@@ -265,8 +301,6 @@ void sys_handle(int pid)
 	ptrace_setregs(pid, &regs);
 }
 
-int cur_pid, focus_pid, exit_now, should_detach;
-unsigned long base;
 
 int mem_write(char *addr, char *buf, int n)
 {
@@ -320,7 +354,6 @@ int mem_read(char *addr, char *buf, int n)
 
 int fork_handle_wrapper(int pid, int child)
 {
-	cur_pid = pid;
 	int should_trace = 1;
 	struct user_regs_struct regs, child_regs;
 	ptrace_getregs(pid, &regs);
@@ -333,7 +366,6 @@ int fork_handle_wrapper(int pid, int child)
 
 int status_handle_wrapper(int pid, int status)
 {
-	cur_pid = pid;
 	int should_exit = 0;
 	struct user_regs_struct regs;
 	int is_regs = ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
@@ -411,10 +443,7 @@ int main(int argc, char **argv, char **envp)
 		flags |= PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE;
 	#endif
 	#ifdef HOOK_SYSCALLS
-		#define RESUME ptrace_syscall
 		flags |= PTRACE_O_TRACESYSGOOD;
-	#else
-		#define RESUME ptrace_cont
 	#endif
 	ptrace_setoptions(pid, flags);
 
@@ -427,8 +456,8 @@ int main(int argc, char **argv, char **envp)
 	RESUME(pid);
 	while (!exit_now) {
 		should_detach = 0;
-		int this_pid = waitpid(-1, &status, 0);
-		if (this_pid == -1)
+		cur_pid = waitpid(-1, &status, 0);
+		if (cur_pid == -1)
 			break;
 		if (WIFSTOPPED(status)) {
 			switch(WEXITSTATUS(status)) {
@@ -438,40 +467,42 @@ int main(int argc, char **argv, char **envp)
 				case PTRACE_EVENT_VFORK:
 				case PTRACE_EVENT_CLONE:
 					int child;
-					ptrace(PTRACE_GETEVENTMSG, this_pid, 0, &child);
+					ptrace(PTRACE_GETEVENTMSG, cur_pid, 0, &child);
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
 					if (fork_handle_wrapper(pid, child)) {
 						ptrace_setoptions(child, flags);
-						RESUME(child);
+						if (!pid_is_paused(child))
+							RESUME(child);
 					} else
 						ptrace_detach(child);
 					break;
 				default:
-					bkpt_handle(this_pid);
+					bkpt_handle(cur_pid);
 				}
 				break;
 			case SIGTRAP|0x80:
-				sys_handle(this_pid);
+				sys_handle(cur_pid);
 				break;
 			default:
 				goto handle_unknown;
 			}
-		} else  {
+		} else {
 		handle_unknown:
 			should_detach = 1;
 			#ifdef STATUS_HANDLER
-				int ret = status_handle_wrapper(this_pid, status);
+				int ret = status_handle_wrapper(cur_pid, status);
 			#else
 				int ret = 0;
 			#endif
-			if (ret != -1 && (ret == 1 || this_pid == focus_pid || focus_pid == -1))
+			puts("here!");
+			if (ret != -1 && (ret == 1 || cur_pid == focus_pid || focus_pid == -1))
 				break;
 		}
 		if (should_detach)
-			ptrace_detach(this_pid);
-		else
-			RESUME(this_pid);
+			ptrace_detach(cur_pid);
+		else if (!pid_is_paused(cur_pid))
+			RESUME(cur_pid);
 	}
 	return 0;
 }

@@ -67,7 +67,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Breakpoint::Fork() = patch.breakpoint {
                 if !seen_fork {
                     hook_str.push_str(&format!(
-                        "void fork_handle(int pid, int child, int *ret, void *arg1, void *arg2){{\n#define regs (*(struct user_regs_struct*)arg1)\n#define child_regs (*(struct user_regs_struct*)arg2)\n#define should_trace (*ret)\n{}\n#undef child_regs\n#undef regs\n#undef should_trace\n}}\n
+                        "void fork_handle(int pid, int child, int *ret, void *arg1, void *arg2)\n{{\n\t#define regs (*(struct user_regs_struct*)arg1)\n\t#define child_regs (*(struct user_regs_struct*)arg2)\n\t#define should_trace (*ret)\n\n{}\n\t#undef child_regs\n\t#undef regs\n\t#undef should_trace\n}}\n
 ",
                         patch.body));
                     seen_fork = true;
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Breakpoint::Status() = patch.breakpoint {
                 if !seen_status {
                     hook_str.push_str(&format!(
-                        "void status_handle(int pid, int status, int *ret, void *arg, int is_regs){{\n#define regs (*(struct user_regs_struct*)arg)\n#define should_exit (*ret)\n{}\n#undef should_exit\n#undef regs\n}}\n",
+                        "void status_handle(int pid, int status, int *ret, void *arg, int is_regs)\n{{\n\t#define regs (*(struct user_regs_struct*)arg)\n\t#define should_exit (*ret)\n\n{}\n\t#undef should_exit\n\t#undef regs\n}}\n",
                         patch.body));
                     seen_status = true;
                 }
@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             hook_str.push_str(&format!(
                 "void hook{}(pid_t pid, void *arg)\n{{\n\t#define regs (*(struct user_regs_struct *)\
-                arg)\n\tcur_pid = pid;\n{}\n\t#undef regs\n}}\n",
+                arg)\n\n{}\n\t#undef regs\n}}\n",
                 hookcnt, patch.body));
             match patch.breakpoint {
                 Breakpoint::Expr(s) => {
@@ -117,20 +117,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    let mut defines = String::new();
     if seen_fork {
-        hook_str.insert_str(0, "#define HOOK_FORKS\n");
+        defines += "#define HOOK_FORKS\n";
     }
     if seen_status {
-        hook_str.insert_str(0, "#define STATUS_HANDLER\n");
+        defines += "#define STATUS_HANDLER\n";
     }
     if hook_sys {
-        hook_str.insert_str(0, "#define HOOK_SYSCALLS\n");
+        defines += "#define HOOK_SYSCALLS\n";
     }
     let mut is_embed = false;
     if let Some(embed) = &opt.embed {
         is_embed = true;
         Path::new(embed).canonicalize()?;
-        hook_str.insert_str(0, "#define EMBED_EXECUTABLE\n");
+        defines += "#define EMBED_EXECUTABLE\n";
         run_command(
             "cp",
             &[embed, "embed.gen.tmp"],
@@ -152,7 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .create(true)
         .truncate(true)
         .open("stub.gen.c")?;
-    genfile.write_all(format!("{}{}{}{}{}", p1, hook_str, p2, init_str, p3).as_bytes())?;
+    genfile.write_all(format!("{}{}{}{}{}{}", defines, p1, hook_str, p2, init_str, p3).as_bytes())?;
     genfile.flush()?;
     println!("stub written to stub.gen.c");
 

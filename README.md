@@ -106,6 +106,19 @@ The tracer will exit upon receiving an unhandled status in which the status hand
 
 To detach from a tracee, set the global variable `should_detach` to `1` from within a hook. The tracee which triggered the hook will be detached after the hook returns.
 
+**Pausing**
+
+The execution of a tracee can be paused/unpaused by passing its pid to the following functions, accessible within hooks:
+```c
+void pid_pause(int pid);
+void pid_unpause(int pid);
+```
+The following function returns `1` if the pid is paused and `0` otherwise.
+```c
+int pid_is_paused(int pid);
+```
+Pausing a tracee prevents it from resuming after its next breakpoint until `pid_unpause` is called, although the associated hook will still run. Pausing will not issue an interrupt and thus only takes effect after the next breakpoint. If a hook initiated from pid `A` pauses pid `A`, pid `A` will not continue execution after the hook.
+
 **Example**
 ```c
 // global variables
@@ -143,4 +156,4 @@ During this process, it needs to be able to read maps from procfs to determine
 the programs's base address (since we start at linker code and extracting base from memory would require nontrivial parsing of the stack).
 
 ## TODO
-- Find a better way to differentiate syscall entry/exit, global pid hash table can cause memory leaks if processes don't properly detach
+- Maybe find a better way to differentiate syscall entry/exit and pausing, global pid table can cause memory leaks if processes don't properly detach
