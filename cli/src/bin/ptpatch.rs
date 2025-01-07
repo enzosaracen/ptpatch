@@ -22,6 +22,7 @@ enum Breakpoint {
     Presys(Vec<String>),
     Postsys(Vec<String>),
     Fork(),
+    Status(),
 }
 
 struct Patch {
@@ -55,7 +56,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut hook_str = String::new();
     let mut init_str = String::new();
     let mut seen_fork = false;
-
+    let mut seen_status = false;
     let mut hook_sys = false;
 
     for path in opt.paths {
@@ -66,9 +67,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Breakpoint::Fork() = patch.breakpoint {
                 if !seen_fork {
                     hook_str.push_str(&format!(
-                        "int fork_handle(int pid, int child){{int should_trace = 1;struct user_regs_struct regs, child_regs;ptrace_getregs(pid, &regs);ptrace_getregs(child, &child_regs);\n{}\nptrace_setregs(pid, &regs);ptrace_setregs(child, &child_regs);return should_trace;}}",
+                        "int fork_handle(int pid, int child, int *ret, void *arg1, void *arg2){{\n#define regs (*(struct user_regs_struct*)arg1)\n#define child_regs (*(struct user_regs_struct*)arg2)\n#define should_trace (*ret)\n{}\n#undef child_regs\n#undef regs\n}}\n
+",
                         patch.body));
                     seen_fork = true;
+                }
+                continue;
+            }
+            if let Breakpoint::Status() = patch.breakpoint {
+                if !seen_status {
+                    hook_str.push_str(&format!(
+                        "int status_handle(int pid, int status, int *ret, void *arg, int is_regs){{\n#define regs (*(struct user_regs_struct*)arg)\n#define should_exit (*ret)\n{}\n#undef should_exit\n#undef regs\n}}\n",
+                        patch.body));
+                    seen_status = true;
                 }
                 continue;
             }
@@ -108,6 +119,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if !seen_fork {
         hook_str.push_str("int fork_handle(int pid, int child){return 1;}");
+    }
+    if !seen_status {
+        hook_str.push_str("int status_handle(int pid, int status){return 0;}");
     }
     if hook_sys {
         hook_str.insert_str(0, "#define HOOK_SYSCALLS\n");
@@ -251,6 +265,9 @@ fn parse_breakpoint(line: &str) -> Result<Breakpoint, Box<dyn Error>> {
     }
     if line.starts_with("fork") {
         return Ok(Breakpoint::Fork());
+    }
+    if line.starts_with("status") {
+        return Ok(Breakpoint::Status());
     }
     if line.is_empty() {
         return Err("breakpoint expression cannot be empty".into());

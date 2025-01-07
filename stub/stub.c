@@ -97,7 +97,7 @@ void ptrace_poketext(pid_t pid, void *addr, long data)
 void ptrace_getregs(pid_t pid, struct user_regs_struct *regs)
 {
 	if (ptrace(PTRACE_GETREGS, pid, 0, regs) < 0) {
-		puts("poketext error");
+		puts("getregs error");
 		exit(1);
 	}
 }
@@ -222,8 +222,7 @@ struct Htab {
 
 int entry_lookup(int pid)
 {
-	int idx = pid % MAX_ENTRY;
-	struct Htab *p = &entry_table[idx];
+	struct Htab *p = &entry_table[pid % MAX_ENTRY];
 	for(;;) {
 		if (p->pid == pid) {
 			int ret = p->entry;
@@ -300,7 +299,31 @@ int mem_read(char *addr, char *buf, int n)
 	return 0;
 }
 
-int fork_handle(int pid, int child);
+int fork_handle(int pid, int child, int *ret, void *arg1, void *arg2);
+int status_handle(int pid, int status, int *ret, void *arg, int is_regs);
+
+int fork_handle_wrapper(int pid, int child)
+{
+	int should_trace = 1;
+	struct user_regs_struct regs, child_regs;
+	ptrace_getregs(pid, &regs);
+	ptrace_getregs(child, &child_regs);
+	fork_handle(pid, child, &should_trace, &regs, &child_regs);
+	ptrace_setregs(pid, &regs);
+	ptrace_setregs(child, &child_regs);
+	return should_trace;
+}
+
+int status_handle_wrapper(int pid, int status)
+{
+	int should_exit = 0;
+	struct user_regs_struct regs;
+	int is_regs = ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
+	status_handle(pid, status, &should_exit, &regs, is_regs);
+	if (is_regs)
+		ptrace_setregs(pid, &regs);
+	return should_exit;
+}
 
 // add hooks here
 
@@ -402,7 +425,7 @@ int main(int argc, char **argv, char **envp)
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
 					cur_pid = pid;
-					if (fork_handle(pid, child))
+					if (fork_handle_wrapper(pid, child))
 						ptrace_setoptions(child, flags);
 					else
 						ptrace(PTRACE_DETACH, child, 0, 0);
@@ -415,10 +438,16 @@ int main(int argc, char **argv, char **envp)
 			case SIGTRAP|0x80:
 				sys_handle(this_pid);
 				break;
+			default:
+				goto handle_unknown;
 			}
-			RESUME(this_pid);
-		} else if (this_pid == focus_pid || focus_pid == -1)
-			break;
+		} else  {
+		handle_unknown:
+			int ret = status_handle_wrapper(this_pid, status);
+			if (ret != -1 && (ret == 1 || this_pid == focus_pid || focus_pid == -1))
+				break;
+		}
+		RESUME(this_pid);
 	}
 	return 0;
 }
