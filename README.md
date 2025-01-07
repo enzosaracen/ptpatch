@@ -64,24 +64,24 @@ The different breakpoint types are defined as follows.
 - **pre-syscall**: executes before the entry of a certain syscall, specified by name or number, comma separated list for multiple syscalls
     ```c
     <@ pre-syscall write, read, 96
-      // modify syscall arguments
+        // modify syscall arguments
     @>
     ```
 
 - **post-syscall**: executes after the completion of a certain syscall
     ```c
     <@ post-syscall write, read, 96
-      // inspect or modify return values
+        // inspect or modify return values
     @>
     ```
 - **fork**: executes when a tracee triggers a fork, vfork, or clone. the new child pid will be stored in a local variable `child`. setting the local variable `should_trace` to `0` will prevent the child from being traced. `regs` for the parent is available to modify as usual, but `child_regs` is also available for registers of the new child. `mem_write` and `mem_read` will operate on the parent by default, but can be switched to the child by setting the global variable `cur_pid` to the child's pid. caution: if using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. this can be fixed by resetting breakpoints on detach, but it's not yet implemented
     ```c
     <@ fork
-      // inspect or modify state, decide whether to trace child
-      if (regs.r15 == 0x42 || child == 69420)
-          should_trace = 0;
-      else
-          child_regs.r15 = 0x100;
+        // inspect or modify state, decide whether to trace child
+        if (regs.r15 == 0x42 || child == 69420)
+            should_trace = 0;
+        else
+            child_regs.r15 = 0x100;
     @>
     ```
 - **status**: executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall) from one of it's tracees. the status is available within the local variable `status`. the local variable `should_exit` can be set to `1` to cause the tracer to exit after the handler returns, or `-1` to force the tracer to not exit. otherwise, whether the tracer exits depends on the rules for exiting defined in the `Exiting` section below. `regs` will try to be gathered for inspecting/modifying, however, it is likely this will fail due to the process having exited, so before accessing `regs`, check the local variable `is_regs` which will be set to `1` if `regs` is usable. the global variable `should_detach` will be set to `1` by default, marking the tracee that triggered the status to be detached from the tracer after the status handler finishes. if you would like the tracer to keep tracing the tracee, `should_detach` must be explicitly set to `0` within the hook
@@ -117,7 +117,7 @@ The following function returns `1` if the pid is paused and `0` otherwise.
 ```c
 int pid_is_paused(int pid);
 ```
-Pausing a tracee prevents it from resuming after its next breakpoint until `pid_unpause` is called, although the associated hook will still run. Pausing will not issue an interrupt and thus only takes effect after the next breakpoint. If a hook initiated from pid `A` pauses pid `A`, pid `A` will not continue execution after the hook.
+Pausing a tracee prevents it from resuming after its next breakpoint until `pid_unpause` is called, but the associated hook will still run. Pausing will not issue an interrupt and thus only takes effect after the next breakpoint. If a hook initiated from pid `A` pauses pid `A`, pid `A` will not continue execution after the hook.
 
 **Example**
 ```c
