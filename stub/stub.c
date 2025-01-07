@@ -301,7 +301,6 @@ void sys_handle(int pid)
 	ptrace_setregs(pid, &regs);
 }
 
-
 int mem_write(char *addr, char *buf, int n)
 {
 	while (n >= 8) {
@@ -495,7 +494,6 @@ int main(int argc, char **argv, char **envp)
 			#else
 				int ret = 0;
 			#endif
-			puts("here!");
 			if (ret != -1 && (ret == 1 || cur_pid == focus_pid || focus_pid == -1))
 				break;
 		}

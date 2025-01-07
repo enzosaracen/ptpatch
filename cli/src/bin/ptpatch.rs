@@ -167,12 +167,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         ],
         "failed to compile stub.gen.c",
     )?;
-    // see stub/Makefile for reasoning on why this isn't enabled
-    /*run_command(
-        "objcopy",
-        &["--strip-section-headers", "stub.out"],
-        "failed to strip section headers from stub.out",
-    )?;*/
     if is_embed {
         run_command(
             "rm",
