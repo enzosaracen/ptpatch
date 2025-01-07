@@ -132,3 +132,6 @@ When the stub runs with a dynamically linked program, it waits until the linker 
 control to the program's entry point before applying hooks.
 During this process, it needs to be able to read maps from procfs to determine
 the programs's base address (since we start at linker code and extracting base from memory would require nontrivial parsing of the stack).
+
+## TODO
+- Avoid memory leaks with collisions in the syscall entry pid hash table after processes exit

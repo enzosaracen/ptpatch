@@ -304,6 +304,7 @@ int status_handle(int pid, int status, int *ret, void *arg, int is_regs);
 
 int fork_handle_wrapper(int pid, int child)
 {
+	cur_pid = pid;
 	int should_trace = 1;
 	struct user_regs_struct regs, child_regs;
 	ptrace_getregs(pid, &regs);
@@ -316,6 +317,7 @@ int fork_handle_wrapper(int pid, int child)
 
 int status_handle_wrapper(int pid, int status)
 {
+	cur_pid = pid;
 	int should_exit = 0;
 	struct user_regs_struct regs;
 	int is_regs = ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
@@ -424,7 +426,6 @@ int main(int argc, char **argv, char **envp)
 					ptrace(PTRACE_GETEVENTMSG, this_pid, 0, &child);
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
-					cur_pid = pid;
 					if (fork_handle_wrapper(pid, child))
 						ptrace_setoptions(child, flags);
 					else
