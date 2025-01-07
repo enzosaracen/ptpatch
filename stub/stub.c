@@ -383,6 +383,7 @@ int status_handle_wrapper(int pid, int status)
 	int should_exit = 0;
 	struct user_regs_struct regs;
 	int is_regs = ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
+	should_detach = !is_regs;
 	status_handle(pid, status, &should_exit, &regs, is_regs);
 	if (is_regs)
 		ptrace_setregs(pid, &regs);
@@ -510,7 +511,6 @@ int main(int argc, char **argv, char **envp)
 			}
 		} else {
 		handle_unknown:
-			should_detach = 1;
 			#ifdef STATUS_HANDLER
 				int ret = status_handle_wrapper(cur_pid, status);
 			#else
