@@ -212,6 +212,7 @@ struct pidtab {
 enum pidtab_op {
 	PIDTAB_TOGGLE,
 	PIDTAB_SET,
+	PIDTAB_EXISTS,
 	PIDTAB_NOP,
 };
 
@@ -220,6 +221,8 @@ int pidtab_lookup(struct pidtab *tab, int pid, enum pidtab_op op, int val)
 	struct pidtab *p = &tab[pid % MAX_PIDTAB];
 	for(;;) {
 		if (p->pid == pid) {
+			if (op == PIDTAB_EXISTS)
+				return 1;
 			int ret = p->val;
 			if (op == PIDTAB_TOGGLE)
 				p->val = !p->val;
@@ -231,6 +234,8 @@ int pidtab_lookup(struct pidtab *tab, int pid, enum pidtab_op op, int val)
 			break;
 		p = p->next;
 	}
+	if (op == PIDTAB_EXISTS)
+		return 0;
 	p->next = malloc(sizeof(struct pidtab));
 	p->next->pid = pid;
 	p->next->val = val;
@@ -278,8 +283,19 @@ int pid_is_paused(int pid)
 	return pidtab_lookup(pause_tab, pid, PIDTAB_NOP, 0);
 }
 
+int pid_exists(int pid)
+{
+	return pidtab_lookup(pause_tab, pid, PIDTAB_EXISTS, 0);
+}
+
+void pid_add(int pid)
+{
+	pidtab_lookup(pause_tab, pid, PIDTAB_SET, 0);
+}
+
 void ptrace_detach(int pid)
 {
+	printf("detach: %d\n", pid);
 	ptrace(PTRACE_DETACH, pid, 0, 0);
 	pidtab_delete(entry_tab, pid);
 	pidtab_delete(pause_tab, pid);
@@ -449,14 +465,18 @@ int main(int argc, char **argv, char **envp)
 
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);
-	
+
+
 	focus_pid = pid;
 	RESUME(pid);
+	pid_add(pid);
 	while (!exit_now) {
-		should_detach = 0;
 		cur_pid = waitpid(-1, &status, 0);
 		if (cur_pid == -1)
 			break;
+		if (!pid_exists(cur_pid))
+			continue;
+		should_detach = 0;
 		if (WIFSTOPPED(status)) {
 			switch(WEXITSTATUS(status)) {
 			case SIGTRAP:
@@ -464,8 +484,11 @@ int main(int argc, char **argv, char **envp)
 				case PTRACE_EVENT_FORK:
 				case PTRACE_EVENT_VFORK:
 				case PTRACE_EVENT_CLONE:
-					int child;
+					int child = -1;
 					ptrace(PTRACE_GETEVENTMSG, cur_pid, 0, &child);
+					if (child == -1)
+						err("geteventmsg");
+					pid_add(child);
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
 					if (fork_handle_wrapper(pid, child)) {

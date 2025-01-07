@@ -54,6 +54,7 @@ The code within each hook has access to the following predefined variables and f
 - `regs`: struct `user_regs_struct` representing the current register state, modifications will be applied to the tracee after the hook returns
 - `int mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`, return `0` on success
 - `int mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`, return `0` on success
+- `mem_write` and `mem_read` will operate on the process that triggered the hook by default, but can be switched to an arbitrary process by temporarily setting the global variable `cur_pid`. `cur_pid` should be restored to `pid` before the hook exits
 
 The different breakpoint types are defined as follows.
 
@@ -78,7 +79,7 @@ The different breakpoint types are defined as follows.
         // inspect or modify return values
     @>
     ```
-- **fork**: executes when a tracee triggers a fork, vfork, or clone. the new child pid will be stored in a local variable `child`. setting the local variable `should_trace` to `0` will prevent the child from being traced. `regs` for the parent is available to modify as usual, but `child_regs` is also available for registers of the new child. `mem_write` and `mem_read` will operate on the parent by default, but can be switched to the child by setting the global variable `cur_pid` to the child's pid. caution: if using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. this can be fixed by resetting breakpoints on detach, but it's not yet implemented
+- **fork**: executes when a tracee triggers a fork, vfork, or clone. the new child pid will be stored in a local variable `child`. setting the local variable `should_trace` to `0` will prevent the child from being traced. `regs` for the parent is available to modify as usual, but `child_regs` is also available for registers of the new child.  caution: if using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. this can be fixed by resetting breakpoints on detach, but it's not yet implemented
     ```c
     <@ fork
         // inspect or modify state, decide whether to trace child
