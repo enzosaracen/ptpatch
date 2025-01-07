@@ -269,8 +269,7 @@ void pid_pause(int pid)
 
 void pid_unpause(int pid)
 {
-	pidtab_lookup(pause_tab, pid, PIDTAB_SET, 0);
-	if (pid != cur_pid)
+	if (pidtab_lookup(pause_tab, pid, PIDTAB_SET, 0) && pid != cur_pid)
 		RESUME(pid);
 }
 
