@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if let Breakpoint::Status() = patch.breakpoint {
                 if !seen_status {
                     hook_str.push_str(&format!(
-                        "void status_handle(int pid, int status, int *ret, void *arg, int is_regs)\n{{\n\t#define regs (*(struct user_regs_struct*)arg)\n\t#define should_exit (*ret)\n\n{}\n\t#undef should_exit\n\t#undef regs\n}}\n",
+                        "void status_handle(int pid, int status, void *arg, int is_regs)\n{{\n\t#define regs (*(struct user_regs_struct*)arg)\n\n{}\n\t#undef regs\n}}\n",
                         patch.body));
                     seen_status = true;
                 }

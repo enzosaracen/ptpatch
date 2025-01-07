@@ -360,7 +360,7 @@ int mem_read(char *addr, char *buf, int n)
 // add hooks here
 
 #ifndef STATUS_HANDLER
-	void status_handle(int pid, int status, int *ret, void *arg, int is_regs) {};
+	void status_handle(int pid, int status, void *arg, int is_regs) {};
 #endif
 #ifndef HOOK_FORKS
 	void fork_handle(int pid, int child, int *ret, void *arg1, void *arg2) {};
@@ -378,16 +378,14 @@ int fork_handle_wrapper(int pid, int child)
 	return should_trace;
 }
 
-int status_handle_wrapper(int pid, int status)
+void status_handle_wrapper(int pid, int status)
 {
-	int should_exit = 0;
 	struct user_regs_struct regs;
 	int is_regs = ptrace(PTRACE_GETREGS, pid, 0, &regs) >= 0;
 	should_detach = !is_regs;
-	status_handle(pid, status, &should_exit, &regs, is_regs);
+	status_handle(pid, status, &regs, is_regs);
 	if (is_regs)
 		ptrace_setregs(pid, &regs);
-	return should_exit;
 }
 
 int main(int argc, char **argv, char **envp)
@@ -467,7 +465,6 @@ int main(int argc, char **argv, char **envp)
 	for (int i = 0; i < bkpt_cnt; i++)
 		bkpt_insert(&bkpt_tab[i]);
 
-
 	focus_pid = pid;
 	RESUME(pid);
 	pid_add(pid);
@@ -512,15 +509,17 @@ int main(int argc, char **argv, char **envp)
 		} else {
 		handle_unknown:
 			#ifdef STATUS_HANDLER
-				int ret = status_handle_wrapper(cur_pid, status);
+				status_handle_wrapper(cur_pid, status);
 			#else
-				int ret = 0;
+				struct user_regs_struct regs;
+				should_detach = ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0;
 			#endif
-			if (ret != -1 && (ret == 1 || cur_pid == focus_pid || focus_pid == -1))
-				break;
 		}
-		if (should_detach)
+		if (should_detach) {
+			if (cur_pid == focus_pid)
+				break;
 			ptrace_detach(cur_pid);
+		}
 		else if (!pid_is_paused(cur_pid))
 			RESUME(cur_pid);
 	}
