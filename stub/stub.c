@@ -1,8 +1,6 @@
 #include <sys/user.h>
 #include <sys/personality.h>
 
-#define INIT_AFTER_ENTRY 1
-
 #define PTRACE_O_TRACESYSGOOD   0x01
 #define PTRACE_O_TRACEFORK      0x02
 #define PTRACE_O_TRACEVFORK     0x04
@@ -65,113 +63,98 @@ enum __ptrace_request
 	PTRACE_GET_RSEQ_CONFIGURATION = 0x420f
 };
 
-long ptrace(enum __ptrace_request request, pid_t pid, void *addr, void *data)
+void err(char *s)
+{
+	printf("error: %s", s);
+	exit(1);
+}
+
+long ptrace(enum __ptrace_request request, int pid, void *addr, void *data)
 {
 	return syscall(__NR_ptrace, request, pid, addr, data);
 }
 
-long ptrace_peektext(pid_t pid, void *addr)
+long ptrace_peektext(int pid, void *addr)
 {
 	long data;
-	if (ptrace(PTRACE_PEEKTEXT, pid, addr, &data) < 0) {
-		puts("peektext error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_PEEKTEXT, pid, addr, &data) < 0)
+		err("peektext");
 	return data;
 }
 
-int ptrace_testtext(pid_t pid, void *addr)
+int ptrace_testtext(int pid, void *addr)
 {
 	long data;
 	return ptrace(PTRACE_PEEKTEXT, pid, addr, &data);
 }
 
-void ptrace_poketext(pid_t pid, void *addr, long data)
+void ptrace_poketext(int pid, void *addr, long data)
 {
-	if (ptrace(PTRACE_POKETEXT, pid, addr, (void*)data) < 0) {
-		puts("poketext error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_POKETEXT, pid, addr, (void*)data) < 0)
+		err("poketext");
 }
 
-void ptrace_getregs(pid_t pid, struct user_regs_struct *regs)
+void ptrace_getregs(int pid, struct user_regs_struct *regs)
 {
-	if (ptrace(PTRACE_GETREGS, pid, 0, regs) < 0) {
-		puts("getregs error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_GETREGS, pid, 0, regs) < 0)
+		err("getregs");
 }
 
-void ptrace_setregs(pid_t pid, struct user_regs_struct *regs)
+void ptrace_setregs(int pid, struct user_regs_struct *regs)
 {
-	if (ptrace(PTRACE_SETREGS, pid, 0, regs) < 0) {
-		puts("setregs error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_SETREGS, pid, 0, regs) < 0)
+		err("setregs");
 }
 
-void ptrace_cont(pid_t pid)
+void ptrace_cont(int pid)
 {
-	if (ptrace(PTRACE_CONT, pid, 0, 0) < 0) {
-		puts("cont error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_CONT, pid, 0, 0) < 0)
+		err("cont");
 }
 
-void ptrace_syscall(pid_t pid)
+void ptrace_syscall(int pid)
 {
-	if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0) {
-		puts("syscall error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0)
+		err("syscall");
 }
 
 void ptrace_traceme(void)
 {
-	if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) {
-		puts("traceme error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0)
+		err("traceme");
 }
 
-void ptrace_singlestep(pid_t pid)
+void ptrace_singlestep(int pid)
 {
-	if (ptrace(PTRACE_SINGLESTEP, pid, 0, 0) < 0) {
-		puts("singlestep error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_SINGLESTEP, pid, 0, 0) < 0)
+		err("singlestep");
 }
 
-void ptrace_setoptions(pid_t pid, long data)
+void ptrace_setoptions(int pid, long data)
 {
-	if (ptrace(PTRACE_SETOPTIONS, pid, 0, (void*)data) < 0) {
-		puts("setoptions error");
-		exit(1);
-	}
+	if (ptrace(PTRACE_SETOPTIONS, pid, 0, (void*)data) < 0)
+		err("setoptions");
 }
 
 struct Breakpoint {
 	int idx;
-	pid_t pid;
+	int pid;
 	void *addr;
-	void (*hook)(pid_t, void *);
+	void (*hook)(int, void *);
 	long orig;
 };
 
 #define MAX_BKPTS 64
-
 int bkpt_cnt;
 struct Breakpoint bkpt_tab[MAX_BKPTS];
 
-int bkpt_add(pid_t pid, void *addr, void (*hook)(pid_t, void *))
+int bkpt_add(int pid, void *addr, void (*hook)(int, void *))
 {
 	if (bkpt_cnt >= MAX_BKPTS)
 		return -1;
 	for (int i = 0; i < bkpt_cnt; i++)
-		if (bkpt_tab[i].addr == addr) {
-			puts("duplicate breakpoint error");
-			exit(1);
-		}
+		if (bkpt_tab[i].addr == addr)
+			err("duplicate breakpoint");
 	bkpt_tab[bkpt_cnt].pid = pid;
 	bkpt_tab[bkpt_cnt].addr = addr;
 	bkpt_tab[bkpt_cnt].hook = hook;
@@ -182,10 +165,10 @@ int bkpt_add(pid_t pid, void *addr, void (*hook)(pid_t, void *))
 void bkpt_insert(struct Breakpoint *bkpt)
 {
 	bkpt->orig = ptrace_peektext(bkpt->pid, bkpt->addr);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig&~0xff)|0xcc);
+	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|0xcc);
 }
 
-int bkpt_handle(pid_t pid)
+int bkpt_handle(int pid)
 {
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
@@ -204,14 +187,13 @@ int bkpt_handle(pid_t pid)
 	ptrace_setregs(pid, &regs);
 	ptrace_singlestep(pid);
 	waitpid(pid, 0, 0);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig&~0xff)|0xcc);
+	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|0xcc);
 	return 0;
 }
 
-#define MAX_SYSNR 500
-
-void (*presys_hooks[MAX_SYSNR])(pid_t, void *);
-void (*postsys_hooks[MAX_SYSNR])(pid_t, void *);
+#define MAX_SYSNR 1024
+void (*presys_hooks[MAX_SYSNR])(int, void *);
+void (*postsys_hooks[MAX_SYSNR])(int, void *);
 
 #define MAX_ENTRY 1024
 struct Htab {
@@ -240,7 +222,7 @@ int entry_lookup(int pid)
 	return 0;
 }
 
-void ptrace_detach(pid_t pid)
+void ptrace_detach(int pid)
 {
 	ptrace(PTRACE_DETACH, pid, 0, 0);
 	struct Htab *p = &entry_table[pid % MAX_ENTRY], *prev = 0;
@@ -268,7 +250,7 @@ void ptrace_detach(pid_t pid)
     }
 }
 
-void sys_handle(pid_t pid)
+void sys_handle(int pid)
 {
 	struct user_regs_struct regs;
 	ptrace_getregs(pid, &regs);
@@ -327,8 +309,14 @@ int mem_read(char *addr, char *buf, int n)
 	return 0;
 }
 
-void fork_handle(int pid, int child, int *ret, void *arg1, void *arg2);
-void status_handle(int pid, int status, int *ret, void *arg, int is_regs);
+// add hooks here
+
+#ifndef STATUS_HANDLER
+	void status_handle(int pid, int status, int *ret, void *arg, int is_regs) {};
+#endif
+#ifndef HOOK_FORKS
+	void fork_handle(int pid, int child, int *ret, void *arg1, void *arg2) {};
+#endif
 
 int fork_handle_wrapper(int pid, int child)
 {
@@ -355,26 +343,21 @@ int status_handle_wrapper(int pid, int status)
 	return should_exit;
 }
 
-// add hooks here
-
-char procbuf[22] = "/proc////////////maps";
-
 int main(int argc, char **argv, char **envp)
 {
+	#define INIT_AFTER_ENTRY
 	unsigned long entry = 0;
 
 	#ifndef EMBED_EXECUTABLE	
 		if (argc < 2)
 			return 1;
-
-		if (INIT_AFTER_ENTRY) {
+		#ifdef INIT_AFTER_ENTRY
 			int fd = open(argv[1], O_RDONLY);
 			lseek(fd, 24, SEEK_SET);
 			read(fd, &entry, 8);
 			close(fd);
-		}
-
-		pid_t pid = fork();
+		#endif
+		int pid = fork();
 		if (!pid) {
 			ptrace_traceme();
 			execve(argv[1], &argv[1], envp);
@@ -383,14 +366,15 @@ int main(int argc, char **argv, char **envp)
 	#else
 		extern char _binary_embed_gen_tmp_start[];
 		extern char _binary_embed_gen_tmp_end[];
-		int fd = memfd_create("embed", 0);
+		int fd = memfd_create("", 0);
 		write(fd, _binary_embed_gen_tmp_start,
 			(unsigned long)&_binary_embed_gen_tmp_end-(unsigned long)&_binary_embed_gen_tmp_start);
 
-		if (INIT_AFTER_ENTRY)
+		#ifdef INIT_AFTER_ENTRY
 			entry = *(unsigned long*)((char*)(_binary_embed_gen_tmp_start)+24);
+		#endif
 
-		pid_t pid = fork();
+		int pid = fork();
 		if (!pid) {
 			ptrace_traceme();
 			syscall(322, fd, "", argv, envp, 0x1000);
@@ -400,17 +384,14 @@ int main(int argc, char **argv, char **envp)
 
 	int status;
 	waitpid(pid, 0, 0);
-	if (INIT_AFTER_ENTRY) {
+	#ifdef INIT_AFTER_ENTRY
 		if (ptrace_testtext(pid, (void*)entry) < 0) {
-			// we must be dynamic, easiest way to find base is through proc.
-			// unfortunately nolibc doesn't contain any sprintf functions
+			char procbuf[] = "/proc////////////maps";
 			int i = 15;
 			for(int v = pid; v > 0; v /= 10)
 				procbuf[i--] = '0' + v%10;
 			int fd = open(procbuf, O_RDONLY);
 			char buf[13];
-			// assume first address in maps is exe base,
-			// don't know of any cases for dyn where this isn't true
 			read(fd, buf, 12);
 			close(fd);
 			buf[12] = 0;
@@ -418,14 +399,17 @@ int main(int argc, char **argv, char **envp)
 			entry += base;
 		}
 		long orig = ptrace_peektext(pid, (void*)entry);
-		ptrace_poketext(pid, (void*)entry, (orig&~0xff)|0xcc);
+		ptrace_poketext(pid, (void*)entry, (orig & ~0xff)|0xcc);
 		ptrace_cont(pid);
 		waitpid(pid, &status, 0);
 		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))
 			exit(1);
-	}
+	#endif
 
-	int flags = PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE;
+	int flags = 0;
+	#ifdef HOOK_FORKS
+		flags |= PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE;
+	#endif
 	#ifdef HOOK_SYSCALLS
 		#define RESUME ptrace_syscall
 		flags |= PTRACE_O_TRACESYSGOOD;
@@ -476,7 +460,11 @@ int main(int argc, char **argv, char **envp)
 		} else  {
 		handle_unknown:
 			should_detach = 1;
-			int ret = status_handle_wrapper(this_pid, status);
+			#ifdef STATUS_HANDLER
+				int ret = status_handle_wrapper(this_pid, status);
+			#else
+				int ret = 0;
+			#endif
 			if (ret != -1 && (ret == 1 || this_pid == focus_pid || focus_pid == -1))
 				break;
 		}
