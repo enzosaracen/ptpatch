@@ -118,10 +118,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if !seen_fork {
-        hook_str.push_str("int fork_handle(int pid, int child){return 1;}");
+        hook_str.push_str("int fork_handle(int pid, int child, int *ret, void *arg1, void *arg2){*ret = 1;}");
     }
     if !seen_status {
-        hook_str.push_str("int status_handle(int pid, int status){return 0;}");
+        hook_str.push_str("int status_handle(int pid, int status, int *ret, void *arg, int is_regs){*ret = 0;}");
     }
     if hook_sys {
         hook_str.insert_str(0, "#define HOOK_SYSCALLS\n");
