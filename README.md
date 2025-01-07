@@ -84,18 +84,27 @@ The different breakpoint types are defined as follows.
           child_regs.r15 = 0x100;
     @>
     ```
-- **status**: executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall) from one of it's tracees. the status is available within the local variable `status`. the local variable `should_exit` can be set to `1` to cause the tracer to exit after the handler returns, or `-1` to force the tracer to not exit. otherwise, whether the tracer exits depends on the rules for exiting defined in the `Exiting` section below. `regs` will try to be gathered for inspecting/modifying, however, it is likely this will fail due to the process having exited, so before accessing `regs`, check the local variable `is_regs` which will be set to `1` if `regs` is usable
+- **status**: executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall) from one of it's tracees. the status is available within the local variable `status`. the local variable `should_exit` can be set to `1` to cause the tracer to exit after the handler returns, or `-1` to force the tracer to not exit. otherwise, whether the tracer exits depends on the rules for exiting defined in the `Exiting` section below. `regs` will try to be gathered for inspecting/modifying, however, it is likely this will fail due to the process having exited, so before accessing `regs`, check the local variable `is_regs` which will be set to `1` if `regs` is usable. the global variable `should_detach` will be set to `1` by default, marking the tracee that triggered the status to be detached from the tracer after the status handler finishes. if you would like the tracer to keep tracing the tracee, `should_detach` must be explicitly set to `0` within the hook
     ```c
     <@ status
         // inspect or modify state, decide whether to exit the tracer based on status
-        if (WIFEXITED(status))
+        if (WIFEXITED(status)) {
             should_exit = 1;
+            return;
+        }
+        if (is_regs)
+            printf("rip = %p\n", regs.rip);
+        should_detach = 0;
     @>
     ```
 
 **Exiting**
 
-The tracer will exit upon receiving an unhandled status in which the status handler hook returns a `1`, or, as long as the status handler return value is not `-1`, if the process's pid equals the global variable `focus_pid`. `focus_pid` is set to the original process's pid by default, so children exiting will not cause the tracer to exit. `focus_pid` can be changed from within a hook function. If `focus_pid` is set to `-1`, an unhandled status from any process will cause the tracer to exit. Additionally, the global variable `exit_now` can be set to `1` from within a hook to immediately exit the tracer. There is currently no support to set muliple different pids as focuses, but this logic can be implemented within the custom status handler.
+The tracer will exit upon receiving an unhandled status in which the status handler hook returns a `1`, or, so long as the status handler return value is not `-1`, if the process's pid equals the global variable `focus_pid`. `focus_pid` is set to the original process's pid by default, so children exiting will not cause the tracer to exit. `focus_pid` can be changed from within a hook function. If `focus_pid` is set to `-1`, an unhandled status from any process will cause the tracer to exit. Additionally, the global variable `exit_now` can be set to `1` from within a hook to immediately exit the tracer. There is currently no support to set muliple different pids as focuses, but this logic can be implemented within the custom status handler.
+
+**Detaching**
+
+To detach from a tracee, set the global variable `should_detach` to `1` from within a hook. The tracee which triggered the hook will be detached after the hook returns.
 
 **Example**
 ```c
@@ -134,4 +143,4 @@ During this process, it needs to be able to read maps from procfs to determine
 the programs's base address (since we start at linker code and extracting base from memory would require nontrivial parsing of the stack).
 
 ## TODO
-- Avoid memory leaks with collisions in the syscall entry pid hash table after processes exit
+- Find a better way to differentiate syscall entry/exit, global pid hash table can cause memory leaks if processes don't properly detach

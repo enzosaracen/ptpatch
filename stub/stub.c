@@ -240,6 +240,34 @@ int entry_lookup(int pid)
 	return 0;
 }
 
+void ptrace_detach(pid_t pid)
+{
+	ptrace(PTRACE_DETACH, pid, 0, 0);
+	struct Htab *p = &entry_table[pid % MAX_ENTRY], *prev = 0;
+    if (p->pid == pid) {
+        if (p->next) {
+            struct Htab *tmp = p->next;
+            *p = *tmp;
+            free(tmp);
+        } else {
+            p->pid = 0;
+            p->entry = 0;
+        }
+        return;
+    }
+    while (p) {
+        if (p->pid == pid) {
+            if (prev) {
+                prev->next = p->next;
+            }
+            free(p);
+            return;
+        }
+        prev = p;
+        p = p->next;
+    }
+}
+
 void sys_handle(pid_t pid)
 {
 	struct user_regs_struct regs;
@@ -255,7 +283,7 @@ void sys_handle(pid_t pid)
 	ptrace_setregs(pid, &regs);
 }
 
-int cur_pid, focus_pid, exit_now;
+int cur_pid, focus_pid, exit_now, should_detach;
 unsigned long base;
 
 int mem_write(char *addr, char *buf, int n)
@@ -299,8 +327,8 @@ int mem_read(char *addr, char *buf, int n)
 	return 0;
 }
 
-int fork_handle(int pid, int child, int *ret, void *arg1, void *arg2);
-int status_handle(int pid, int status, int *ret, void *arg, int is_regs);
+void fork_handle(int pid, int child, int *ret, void *arg1, void *arg2);
+void status_handle(int pid, int status, int *ret, void *arg, int is_regs);
 
 int fork_handle_wrapper(int pid, int child)
 {
@@ -414,7 +442,10 @@ int main(int argc, char **argv, char **envp)
 	focus_pid = pid;
 	RESUME(pid);
 	while (!exit_now) {
+		should_detach = 0;
 		int this_pid = waitpid(-1, &status, 0);
+		if (this_pid == -1)
+			break;
 		if (WIFSTOPPED(status)) {
 			switch(WEXITSTATUS(status)) {
 			case SIGTRAP:
@@ -426,11 +457,11 @@ int main(int argc, char **argv, char **envp)
 					ptrace(PTRACE_GETEVENTMSG, this_pid, 0, &child);
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
-					if (fork_handle_wrapper(pid, child))
+					if (fork_handle_wrapper(pid, child)) {
 						ptrace_setoptions(child, flags);
-					else
-						ptrace(PTRACE_DETACH, child, 0, 0);
-					RESUME(child);
+						RESUME(child);
+					} else
+						ptrace_detach(child);
 					break;
 				default:
 					bkpt_handle(this_pid);
@@ -444,11 +475,15 @@ int main(int argc, char **argv, char **envp)
 			}
 		} else  {
 		handle_unknown:
+			should_detach = 1;
 			int ret = status_handle_wrapper(this_pid, status);
 			if (ret != -1 && (ret == 1 || this_pid == focus_pid || focus_pid == -1))
 				break;
 		}
-		RESUME(this_pid);
+		if (should_detach)
+			ptrace_detach(this_pid);
+		else
+			RESUME(this_pid);
 	}
 	return 0;
 }
