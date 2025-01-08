@@ -10,7 +10,7 @@ The `ptpatch` CLI accepts one or more patch file arguments in the [custom format
 ptpatch [options] [patch_files ...]
 ```
 A `stub.gen.c` file will be generated and automatically compiled to `stub.out`.
-By default, `stub.out` will be isolated, meaning it can be run with any executable by specifying its path as the first argument.
+By default, `stub.out` will be generic, meaning it can be run with any executable by specifying its path as the first argument.
 ```
 ./stub.out /path/to/exe [args_for_exe ...]
 ```
