@@ -295,7 +295,6 @@ void pid_add(int pid)
 
 void ptrace_detach(int pid)
 {
-	printf("detach: %d\n", pid);
 	ptrace(PTRACE_DETACH, pid, 0, 0);
 	pidtab_delete(entry_tab, pid);
 	pidtab_delete(pause_tab, pid);
@@ -356,6 +355,21 @@ int mem_read(char *addr, char *buf, int n)
 	}
 	return 0;
 }
+
+/*
+void phony_syscall(long nr, long arg1, long arg2, long arg3, long arg4, long arg5, long arg6)
+{
+	struct user_regs_struct saved_regs, regs;
+	ptrace_getregs(cur_pid, &saved_regs);
+	regs = saved_regs;
+	regs.rax = nr;
+	regs.rdi = arg1;
+	regs.rsi = arg2;
+	regs.rdx = arg3;
+	regs.r10 = arg4;
+	regs.r8 = arg5;
+	regs.r9 = arg6;
+}*/
 
 // add hooks here
 
