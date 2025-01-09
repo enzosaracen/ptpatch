@@ -60,7 +60,7 @@ The code within each hook is executed whenever a tracee triggers the breakpoint 
 - `int exit_now`
     - If set to a non-zero value, the tracer will exit immediately after the hook returns.
 - `int should_detach`
-    - If set to a non-zero value, the tracer will detach from the current tracee after the hook returns. `should_detach` is set to `0` by default, with the [exception of status breakpoints](##status)
+    - If set to a non-zero value, the tracer will detach from the current tracee after the hook returns. `should_detach` is set to `0` by default, with the [exception of status breakpoints.](##status)
 - `int focus_pid`
     - The tracer will exit if a tracee with PID of `focus_pid` is detached. `focus_pid` is set to the first tracee's PID by default. This is a global variable that is persistent across hooks.
 
@@ -78,6 +78,7 @@ Pausing does not issue interrupts and thus only takes effect after the target tr
     - For tracee with PID of `pid`, return `1` if paused, `0` if unpaused, or `-1` on error.
 - `int pid_exists(int pid)`
     - If there exists a tracee with PID of `pid`, return `1`, else `0`.
+
 #### Memory
 The functions below interface memory transfer between tracer and tracee.
 - `int mem_write(char *addr, char *buf, int n)`
@@ -88,11 +89,12 @@ The functions below interface memory transfer between tracer and tracee.
     - Perform `mem_write` on a paused tracee with PID of `pid`.
 - `int pid_mem_read(int pid, char *addr, char *buf, int n)`
     - Perform `mem_read` on a paused tracee with PID of `pid`.
+
 #### Injection
 The functions below interface syscall injection into tracees. Injected syscalls are executed immediately and will not trigger any hooks. Register state will be saved and restored before function return. The return value is the syscall return value, and any injection failure will exit the tracer. As an exception, `pid_inject_syscall` will return `-1` if the passed PID does not correspond to a valid paused tracee. This is indistinguishable from a normal syscall return value, so ensure `pid_is_paused(pid) == 1` to guarantee a syscall actually occurred.
-- **`long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)`**
+- `long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)`
     - Execute a syscall in the current tracee with syscall number `nr` and arguments `a1` through `a6`, return the syscall return value.
-- **`long pid_inject_syscall(int pid, long nr, long a1, long a2, long a3, long a4, long a5, long a6)`**
+- `long pid_inject_syscall(int pid, long nr, long a1, long a2, long a3, long a4, long a5, long a6)`
     - Perform `inject_syscall` on a paused tracee with PID of `pid`.
 
 ## Breakpoints
