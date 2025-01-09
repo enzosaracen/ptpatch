@@ -208,7 +208,7 @@ void (*postsys_hooks[MAX_SYSNR])(int, void *);
 #define MAX_PIDTAB 1024
 struct pidtab {
 	int pid;
-	char paused;
+	char paused, pausing;
 	char entry;
 	struct pidtab *next;
 } global_pidtab[MAX_PIDTAB];
@@ -220,6 +220,7 @@ enum pidtab_op {
 	PIDTAB_UNPAUSE,
 	PIDTAB_IS_PAUSED,
 	PIDTAB_TOGGLE_ENTRY,
+	PIDTAB_RESUME,
 };
 
 int pidtab_lookup(int pid, enum pidtab_op op)
@@ -231,20 +232,31 @@ int pidtab_lookup(int pid, enum pidtab_op op)
 			case PIDTAB_EXISTS:
 				return 1;
 			case PIDTAB_PAUSE:
-				p->paused = 1;
+				if (!p->paused)
+					p->pausing = 1;
 				return 0;
 			case PIDTAB_UNPAUSE:
 				if (p->paused && pid != cur_pid)
 					RESUME(pid);
 				p->paused = 0;
+				p->pausing = 0;
 				return 0;
 			case PIDTAB_IS_PAUSED:
 				return p->paused;
 			case PIDTAB_TOGGLE_ENTRY:
 				p->entry = !p->entry;
 				return p->entry;
+			case PIDTAB_RESUME:
+				if (p->pausing) {
+					p->paused = 1;
+					p->pausing = 0;
+				}
+				if (!p->paused)
+					RESUME(pid);
+				return 0;
+			default:
+				return -1;
 			}
-			return -1;
 		}
 		if (!p->next)
 			break;
@@ -261,7 +273,7 @@ int pidtab_lookup(int pid, enum pidtab_op op)
 		p = p->next;
 	}
 	p->pid = pid;
-	p->paused = 1;
+	p->paused = 0;
 	p->entry = 1;
 	p->next = 0;
 	return 0;
@@ -561,8 +573,7 @@ int main(int argc, char **argv, char **envp)
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
 					if (fork_handle_wrapper(pid, child)) {
 						ptrace_setoptions(child, flags);
-						if (!pid_is_paused(child))
-							RESUME(child);
+						pidtab_lookup(child, PIDTAB_RESUME);
 					} else
 						ptrace_detach(child);
 					break;
@@ -589,8 +600,8 @@ int main(int argc, char **argv, char **envp)
 			if (cur_pid == focus_pid)
 				break;
 			ptrace_detach(cur_pid);
-		} else if (!pid_is_paused(cur_pid))
-			RESUME(cur_pid);
+		} else
+			pidtab_lookup(cur_pid, PIDTAB_RESUME);
 	}
 	return 0;
 }
