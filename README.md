@@ -1,5 +1,7 @@
 # ptpatch
-`ptpatch` is a tool for patching Linux executables with a ptracing stub to inspect and modify behavior at runtime. Patches are defined by a series of hook functions written in C with full control over traced processes' registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
+`ptpatch` is a tool for patching Linux executables with a ptracing stub to inspect and modify behavior at runtime.
+Patches are defined by a series of hook functions written in C with full control over traced processes' registers/memory, triggered at specific breakpoints or conditions.
+Only x86-64 binaries are currently supported.
 
 ## Installation
 Run `./install.sh`. `cargo` and `gcc` are required.
@@ -10,12 +12,11 @@ The `ptpatch` CLI accepts one or more patch file arguments in the [custom format
 ptpatch [options] [patch_files ...]
 ```
 A `stub.gen.c` file will be generated and automatically compiled to `stub.out`.
-By default, `stub.out` will be generic, meaning it can be run with any executable by specifying its path as the first argument.
+By default, `stub.out` will be generic, meaning it can be run with any executable by specifying it as the first argument.
 ```
-./stub.out /path/to/exe [args_for_exe ...]
+./stub.out exe [args_for_exe ...]
 ```
-The `--embed` or `-e` option to `ptpatch` takes a single executable file argument and embeds its contents into `stub.out`,
-causing `stub.out` to always run that executable.
+The `--embed` or `-e` option to `ptpatch` takes a single executable file argument and embeds its contents into `stub.out`, causing `stub.out` to always run that executable.
 The size of stubs and thus overhead of embedding is usually below 0x2800 bytes.
 ```
 ptpatch patch.ptp -e exe
@@ -25,7 +26,12 @@ ptpatch patch.ptp -e exe
 See some [example uses of ptpatch here.](examples)
 
 ## Format
-Patch files combine C code with special markers to define a series of hook functions. These hooks are executed each time a process being traced (tracee) triggers the hook's associated breakpoint condition. There will always be a single tracer process responsible for detecting and running hooks. There will initially be a single tracee corresponding to the first process spawned by the executable, but additional tracees may be added or dropped as this tracee spawns children. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
+Patch files combine C code with special markers to define a series of hook functions.
+These hooks are executed each time a process being traced (tracee) triggers the hook's associated breakpoint condition.
+There will always be a single tracer process responsible for detecting and running hooks.
+There will initially be a single tracee corresponding to the first process spawned by the executable, but additional tracees may be added or dropped as this tracee spawns children.
+Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available.
+The structure of a patch file is outlined as follows.
 
 1. **globals**: global variable/function declarations accessible by all hooks
 
@@ -50,7 +56,12 @@ Patch files combine C code with special markers to define a series of hook funct
 The different breakpoint formats [are described later in this section.](#breakpoints)
 
 ## Hooks
-The code within each hook is executed whenever a tracee triggers the breakpoint condition. The tracee which triggered a hook will be referred to as the current tracee. Multiple hooks with overlapping breakpoint conditions are not allowed. Hook code should be treated as code within a C function returning `void`, so `return;` can be used to exit a hook early. Hook code has access to a variety of predefined variables and functions described in the following sections. Hooks with certain breakpoint types may have access to additional variables which are described [in the breakpoints section.](#breakpoints)
+The code within each hook is executed whenever a tracee triggers the breakpoint condition.
+The tracee which triggered a hook will be referred to as the current tracee.
+Multiple hooks with overlapping breakpoint conditions are not allowed.
+Hook code should be treated as code within a C function returning `void`, so `return;` can be used to exit a hook early.
+Hook code has access to a variety of predefined variables and functions described in the following sections.
+Hooks with certain breakpoint types may have access to additional variables which are described [in the breakpoints section.](#breakpoints)
 
 ### Variables
 - `int pid`
@@ -69,7 +80,8 @@ The code within each hook is executed whenever a tracee triggers the breakpoint 
 The functions below interface pause management.
 Most ptrace operations require the tracee to be in a stopped state.
 While the current tracee is always stopped, operations on other tracees from within a hook require explicit pausing.
-Pausing does not issue interrupts and thus only takes effect after the target tracee's next breakpoint, at which point the hook will execute, but the tracee will not be resumed. Note that a pause cannot take effect within the hook that scheduled it, although unpausing works immediately.
+Pausing does not issue interrupts and thus only takes effect after the target tracee's next breakpoint, at which point the hook will execute, but the tracee will not be resumed.
+Note that a pause cannot take effect within the hook that scheduled it, although unpausing works immediately.
 - `int pid_pause(int pid)`
     - Schedule a pause for tracee with PID of `pid`, return `0` on success.
 - `int pid_unpause(int pid)`
@@ -91,7 +103,12 @@ The functions below interface memory transfer between tracer and tracee.
     - Perform `mem_read` on a paused tracee with PID of `pid`.
 
 #### Injection
-The functions below interface syscall injection into tracees. Injected syscalls are executed immediately and will not trigger any hooks. Register state will be saved and restored before function return. The return value is the syscall return value, and any injection failure will exit the tracer. As an exception, `pid_inject_syscall` will return `-1` if the passed PID does not correspond to a valid paused tracee. This is indistinguishable from a normal syscall return value, so ensure `pid_is_paused(pid) == 1` to guarantee a syscall actually occurred.
+The functions below interface syscall injection into tracees.
+Injected syscalls are executed immediately and will not trigger any hooks.
+Register state will be saved and restored before function return.
+The return value is the syscall return value, and any injection failure will exit the tracer.
+As an exception, `pid_inject_syscall` will return `-1` if the passed PID does not correspond to a valid paused tracee.
+This is indistinguishable from a normal syscall return value, so ensure `pid_is_paused(pid) == 1` to guarantee a syscall actually occurred.
 - `long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)`
     - Execute a syscall in the current tracee with syscall number `nr` and arguments `a1` through `a6`, return the syscall return value.
 - `long pid_inject_syscall(int pid, long nr, long a1, long a2, long a3, long a4, long a5, long a6)`
@@ -135,7 +152,8 @@ Three new variables are introduced:
 - `struct user_regs_struct child_regs`
     - Register state of the child, as the `regs` variable stores the parent's regsiters. Modifications to both will be applied.
 
-Caution: If using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. This can be fixed by resetting breakpoints on detach, but it's not yet implemented.
+Caution: If using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them.
+This can be fixed by resetting breakpoints on detach, but it's not yet implemented.
 ```c
 <@ fork
     // inspect or modify state, decide whether to trace child
@@ -199,10 +217,8 @@ long saved_rdx;
 [More examples here.](examples)
 
 ## Notes
-When the stub runs with a dynamically linked program, it waits until the linker has transfered
-control to the program's entry point before applying hooks.
-During this process, it needs to be able to read maps from procfs to determine
-the programs's base address (since we start at linker code and extracting base from memory would require nontrivial parsing of the stack).
+When the stub runs with a dynamically linked program, it waits until the linker has transfered control to the program's entry point before applying hooks.
+During this process, it needs to be able to read maps from procfs to determine the programs's base address (since we start at linker code and extracting base from memory would require nontrivial parsing of the stack).
 
 ## TODO
 - Eliminate all trap instructions when detaching from a child that is not in an exited state.
