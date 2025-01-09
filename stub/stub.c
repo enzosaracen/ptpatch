@@ -134,6 +134,9 @@ void ptrace_setoptions(int pid, long data)
 		err("setoptions");
 }
 
+#define INS_SYSCALL 0x050f
+#define INS_INT3 0xcc
+
 #ifdef HOOK_SYSCALLS
 #define RESUME ptrace_syscall
 #else
@@ -172,7 +175,7 @@ int bkpt_add(int pid, void *addr, void (*hook)(int, void *))
 void bkpt_insert(struct Breakpoint *bkpt)
 {
 	bkpt->orig = ptrace_peektext(bkpt->pid, bkpt->addr);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|0xcc);
+	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
 }
 
 int bkpt_handle(int pid)
@@ -194,7 +197,7 @@ int bkpt_handle(int pid)
 	ptrace_setregs(pid, &regs);
 	ptrace_singlestep(pid);
 	waitpid(pid, 0, 0);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|0xcc);
+	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
 	return 0;
 }
 
@@ -205,30 +208,43 @@ void (*postsys_hooks[MAX_SYSNR])(int, void *);
 #define MAX_PIDTAB 1024
 struct pidtab {
 	int pid;
-	int val;
+	char paused;
+	char entry;
 	struct pidtab *next;
-} entry_tab[MAX_PIDTAB], pause_tab[MAX_PIDTAB];
+} global_pidtab[MAX_PIDTAB];
 
 enum pidtab_op {
-	PIDTAB_TOGGLE,
-	PIDTAB_SET,
+	PIDTAB_ADD,
 	PIDTAB_EXISTS,
-	PIDTAB_NOP,
+	PIDTAB_PAUSE,
+	PIDTAB_UNPAUSE,
+	PIDTAB_IS_PAUSED,
+	PIDTAB_TOGGLE_ENTRY,
 };
 
-int pidtab_lookup(struct pidtab *tab, int pid, enum pidtab_op op, int val)
+int pidtab_lookup(int pid, enum pidtab_op op)
 {
-	struct pidtab *p = &tab[pid % MAX_PIDTAB];
+	struct pidtab *p = &global_pidtab[pid % MAX_PIDTAB];
 	for(;;) {
 		if (p->pid == pid) {
-			if (op == PIDTAB_EXISTS)
+			switch (op) {
+			case PIDTAB_EXISTS:
 				return 1;
-			int ret = p->val;
-			if (op == PIDTAB_TOGGLE)
-				p->val = !p->val;
-			else if (op == PIDTAB_SET)
-				p->val = val;
-			return ret;
+			case PIDTAB_PAUSE:
+				p->paused = 1;
+				return 0;
+			case PIDTAB_UNPAUSE:
+				if (p->paused && pid != cur_pid)
+					RESUME(pid);
+				p->paused = 0;
+				return 0;
+			case PIDTAB_IS_PAUSED:
+				return p->paused;
+			case PIDTAB_TOGGLE_ENTRY:
+				p->entry = !p->entry;
+				return p->entry;
+			}
+			return -1;
 		}
 		if (!p->next)
 			break;
@@ -236,16 +252,24 @@ int pidtab_lookup(struct pidtab *tab, int pid, enum pidtab_op op, int val)
 	}
 	if (op == PIDTAB_EXISTS)
 		return 0;
-	p->next = malloc(sizeof(struct pidtab));
-	p->next->pid = pid;
-	p->next->val = val;
-	p->next->next = 0;
+	if (op != PIDTAB_ADD)
+		return -1;
+	if (p->pid != 0) {
+		p->next = malloc(sizeof(struct pidtab));
+		if (!p->next)
+			err("malloc");
+		p = p->next;
+	}
+	p->pid = pid;
+	p->paused = 1;
+	p->entry = 1;
+	p->next = 0;
 	return 0;
 }
 
-void pidtab_delete(struct pidtab *tab, int pid)
+void pidtab_delete(int pid)
 {
-	struct pidtab *p = &tab[pid % MAX_PIDTAB], *prev = 0;
+	struct pidtab *p = &global_pidtab[pid % MAX_PIDTAB], *prev = 0;
     if (p->pid == pid) {
         if (p->next) {
             struct pidtab *tmp = p->next;
@@ -267,37 +291,16 @@ void pidtab_delete(struct pidtab *tab, int pid)
     }
 }
 
-void pid_pause(int pid)
-{
-	pidtab_lookup(pause_tab, pid, PIDTAB_SET, 1);
-}
-
-void pid_unpause(int pid)
-{
-	if (pidtab_lookup(pause_tab, pid, PIDTAB_SET, 0) && pid != cur_pid)
-		RESUME(pid);
-}
-
-int pid_is_paused(int pid)
-{
-	return pidtab_lookup(pause_tab, pid, PIDTAB_NOP, 0);
-}
-
-int pid_exists(int pid)
-{
-	return pidtab_lookup(pause_tab, pid, PIDTAB_EXISTS, 0);
-}
-
-void pid_add(int pid)
-{
-	pidtab_lookup(pause_tab, pid, PIDTAB_SET, 0);
-}
+#define pid_add(pid) pidtab_lookup(pid, PIDTAB_ADD)
+#define pid_exists(pid) pidtab_lookup(pid, PIDTAB_EXISTS)
+#define pid_pause(pid) pidtab_lookup(pid, PIDTAB_PAUSE)
+#define pid_unpause(pid) pidtab_lookup(pid, PIDTAB_UNPAUSE)
+#define pid_is_paused(pid) pidtab_lookup(pid, PIDTAB_IS_PAUSED)
 
 void ptrace_detach(int pid)
 {
 	ptrace(PTRACE_DETACH, pid, 0, 0);
-	pidtab_delete(entry_tab, pid);
-	pidtab_delete(pause_tab, pid);
+	pidtab_delete(pid);
 }
 
 void sys_handle(int pid)
@@ -306,7 +309,7 @@ void sys_handle(int pid)
 	ptrace_getregs(pid, &regs);
 	int nr = regs.orig_rax;
 	if (nr >= 0 && nr < MAX_SYSNR) {
-		if (pidtab_lookup(entry_tab, pid, PIDTAB_TOGGLE, 1)) {
+		if (pidtab_lookup(pid, PIDTAB_TOGGLE_ENTRY)) {
 			if (postsys_hooks[nr]) 
 				postsys_hooks[nr](pid, &regs);
 		} else if (presys_hooks[nr])
@@ -356,20 +359,73 @@ int mem_read(char *addr, char *buf, int n)
 	return 0;
 }
 
-/*
-void phony_syscall(long nr, long arg1, long arg2, long arg3, long arg4, long arg5, long arg6)
+long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)
 {
 	struct user_regs_struct saved_regs, regs;
 	ptrace_getregs(cur_pid, &saved_regs);
 	regs = saved_regs;
 	regs.rax = nr;
-	regs.rdi = arg1;
-	regs.rsi = arg2;
-	regs.rdx = arg3;
-	regs.r10 = arg4;
-	regs.r8 = arg5;
-	regs.r9 = arg6;
-}*/
+	regs.rdi = a1;
+	regs.rsi = a2;
+	regs.rdx = a3;
+	regs.r10 = a4;
+	regs.r8 = a5;
+	regs.r9 = a6;
+	void *rip = (void*)saved_regs.rip;
+	long orig = ptrace_peektext(cur_pid, rip);
+	ptrace_poketext(cur_pid, rip, (orig & ~0xffff)|INS_SYSCALL);
+	ptrace_singlestep(cur_pid);
+	int status;
+	#ifdef HOOK_SYSCALLS
+		int skip = 2;
+		while (skip) {
+			waitpid(cur_pid, &status, 0);
+			if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP|0x80)
+				skip--;
+		}
+	#endif
+	for (;;) {
+		waitpid(cur_pid, &status, 0);
+		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP)
+			break;
+	}
+	ptrace_poketext(cur_pid, rip, orig);
+	ptrace_setregs(cur_pid, &saved_regs);
+	return 0;
+}
+
+int pid_mem_write(int pid, char *addr, char *buf, int n)
+{
+	if (!pid_is_paused(pid) && pid != cur_pid)
+		return -1;
+	int tmp = cur_pid;
+	cur_pid = pid;
+	int ret = mem_write(addr, buf, n);
+	cur_pid = tmp;
+	return ret;
+}
+
+int pid_mem_read(int pid, char *addr, char *buf, int n)
+{
+	if (!pid_is_paused(pid) && pid != cur_pid)
+		return -1;
+	int tmp = cur_pid;
+	cur_pid = pid;
+	int ret = mem_read(addr, buf, n);
+	cur_pid = tmp;
+	return ret;
+}
+
+long pid_inject_syscall(int pid, long nr, long a1, long a2, long a3, long a4, long a5, long a6) 
+{
+	if (!pid_is_paused(pid) && pid != cur_pid)
+		return -1;
+	int tmp = cur_pid;
+	cur_pid = pid;
+	int ret = inject_syscall(nr, a1, a2, a3, a4, a5, a6);
+	cur_pid = tmp;
+	return ret;
+}
 
 // add hooks here
 
@@ -458,7 +514,7 @@ int main(int argc, char **argv, char **envp)
 			entry += base;
 		}
 		long orig = ptrace_peektext(pid, (void*)entry);
-		ptrace_poketext(pid, (void*)entry, (orig & ~0xff)|0xcc);
+		ptrace_poketext(pid, (void*)entry, (orig & ~0xff)|INS_INT3);
 		ptrace_cont(pid);
 		waitpid(pid, &status, 0);
 		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))

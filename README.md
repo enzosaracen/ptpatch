@@ -1,5 +1,5 @@
 # ptpatch
-`ptpatch` is a tool for patching Linux executables with a ptracing stub to inspect and modify behavior at runtime. Patches are defined by a series of hook functions written in C with full control over the process's registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
+`ptpatch` is a tool for patching Linux executables with a ptracing stub to inspect and modify behavior at runtime. Patches are defined by a series of hook functions written in C with full control over traced processes' registers/memory, triggered at specific breakpoints or conditions. Only x86-64 binaries are currently supported.
 
 ## Installation
 Run `./install.sh`. `cargo` and `gcc` are required.
@@ -25,7 +25,7 @@ ptpatch patch.ptp -e exe
 See some [example uses of ptpatch here.](examples)
 
 ## Format
-Patch files combine C code with special markers to define a series of hook functions. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
+Patch files combine C code with special markers to define a series of hook functions. These hooks are executed each time a process being traced (tracee) triggers the hook's associated breakpoint condition. There will always be a single tracer process responsible for detecting and running hooks. There will initially be a single tracee corresponding to the first process spawned by the executable, but additional tracees may be added or dropped as this tracee spawns children. Code written in patch files is compiled with Linux's [nolibc](https://lwn.net/Articles/920158/) to minimize stub size, so certain libc features may not be available. The structure of a patch file is outlined as follows.
 
 1. **globals**: global variable/function declarations accessible by all hooks
 
@@ -40,91 +40,136 @@ Patch files combine C code with special markers to define a series of hook funct
  %%
  ```
 
-3. **hooks**: C code enclosed by `<@` and `@>` with a specified breakpoint on the same line after `<@`
+3. **hooks**: C code enclosed by `<@` and `@>` with a specified breakpoint on the same line after `<@`, a patch file can contain any number of hooks
 
  ```c
  <@ breakpoint
      // code
  @>
  ```
+The different breakpoint formats [are described later in this section.](##breakpoints)
 
-The code within each hook has access to the following predefined variables and functions.
+## Hooks
+The code within each hook is executed whenever a tracee triggers the breakpoint condition. The tracee which triggered a hook will be referred to as the current tracee. Multiple hooks with overlapping breakpoint conditions are not allowed. Hook code should be treated as code within a C function returning `void`, so `return;` can be used to exit a hook early. Hook code has access to a variety of predefined variables/functions described in the following sections. Hooks with certain breakpoint types may have access to additional variables which are described [in the breakpoints section.](##breakpoints)
 
-- `pid`: pid of the tracee
-- `regs`: struct `user_regs_struct` representing the current register state, modifications will be applied to the tracee after the hook returns
-- `int mem_write(char *addr, char *buf, int n)`: write `n` bytes from `buf` to the tracee's memory at `addr`, return `0` on success
-- `int mem_read(char *addr, char *buf, int n)`: read `n` bytes from the tracee's memory at `addr` into `buf`, return `0` on success
-- `mem_write` and `mem_read` will operate on the process that triggered the hook by default, but can be switched to an arbitrary process by temporarily setting the global variable `cur_pid`. `cur_pid` should be restored to `pid` before the hook exits
+### Variables
+- **`int pid`**
+    - PID of the current tracee.
 
+- **`struct user_regs_struct regs`**
+    - Register state of the current tracee, modifications will be applied to the tracee after the hook returns.
+
+- **`int exit_now`**
+    - If set to a non-zero value, the tracer will exit immediately after the hook returns.
+
+- **`int should_detach`**
+    - If set to a non-zero value, the tracer will detach from the current tracee after the hook returns. `should_detach` is set to `0` by default, with the exception of `status` breakpoints, [more details in this section.](###status))
+
+- **`int focus_pid`**
+    - The tracer will exit if a tracee with PID equal to `focus_pid` is detached. `focus_pid` is set to the first tracee's PID by default. This is a global variable that is persistent across hooks.
+
+### Functions
+#### Pausing
+The functions below interface pause management.
+Most ptrace operations require the tracee to be in a stopped state.
+While the current tracee is always stopped, operations on other tracees from within a hook require explicit pausing.
+Pausing does not issue interrupts and thus only takes effect after the tracee's next breakpoint, at which point the hook will execute, but the tracee will not be resumed. Note that a pause cannot take effect within the hook that scheduled it, although unpausing works immediately.
+- **`int pid_pause(int pid)`**
+    - Schedule a pause for tracee with PID equal to `pid`, return `0` on success.
+- **`int pid_unpause(int pid)`**
+    - Immediately unpause tracee with PID equal to `pid`, return `0` on success.
+- **`int pid_is_paused(int pid)`**
+    - For tracee with PID equal to `pid`, return `1` if paused, `0` if unpaused, or `-1` on error.
+- **`int pid_exists(int pid)`**
+    - If there exists a tracee with PID equal to `pid`, return `1`, else `0`.
+#### Memory
+The functions below interface memory transfer between tracer and tracee.
+- **`int mem_write(char *addr, char *buf, int n)`**
+    - Write `n` bytes from `buf` (in the tracer's memory) to the current tracee's memory at `addr`, return `0` on success.
+- **`int mem_read(char *addr, char *buf, int n)`**
+    - Read `n` bytes from the current tracee's memory at `addr` into `buf` (in the tracer's memory), return `0` on success.
+- **`int pid_mem_write(int pid, char *addr, char *buf, int n)`**
+    - Perform `mem_write` on a paused tracee with PID equal to `pid`.
+- **`int pid_mem_read(int pid, char *addr, char *buf, int n)`**
+    - Perform `mem_read` on a paused tracee with PID equal to `pid`.
+#### Injection
+The functions below interface syscall injection into tracees. Injected syscalls are executed immediately and will not trigger any hooks. Register state will be saved and restored before function return. The return value is the syscall return value, and any injection failure will exit the tracer. As an exception, `pid_inject_syscall` will return `-1` if the passed PID does not correspond to a valid paused tracee. This is indistinguishable from a normal syscall return value, so ensure `pid_is_paused(pid) == 1` to guarantee a syscall actually occurred.
+- **`long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)`**
+    - Execute a syscall in the current tracee with syscall number `nr` and arguments `a1` through `a6`, return the syscall return value.
+- **`long pid_inject_syscall(int pid, long nr, long a1, long a2, long a3, long a4, long a5, long a6)`**
+    - Perform `inject_syscall` on a paused tracee with PID equal to `pid`.
+
+## Breakpoints
 The different breakpoint types are defined as follows.
 
-- **address-based**: executes whenever PC reaches the address, specified by a C expression
-    ```c
-    <@ base+0x1234
-        // code to execute each time we hit base+0x1234
-    @>
-    ```
-    `base` is a predefined variable representing the executable's base address (useful for PIE)
-
-- **pre-syscall**: executes before the entry of a certain syscall, specified by name or number, comma separated list for multiple syscalls
-    ```c
-    <@ pre-syscall write, read, 96
-        // modify syscall arguments
-    @>
-    ```
-
-- **post-syscall**: executes after the completion of a certain syscall
-    ```c
-    <@ post-syscall write, read, 96
-        // inspect or modify return values
-    @>
-    ```
-- **fork**: executes when a tracee triggers a fork, vfork, or clone. the new child pid will be stored in a local variable `child`. setting the local variable `should_trace` to `0` will prevent the child from being traced. `regs` for the parent is available to modify as usual, but `child_regs` is also available for registers of the new child.  caution: if using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. this can be fixed by resetting breakpoints on detach, but it's not yet implemented
-    ```c
-    <@ fork
-        // inspect or modify state, decide whether to trace child
-        if (regs.r15 == 0x42 || child == 69420)
-            should_trace = 0;
-        else
-            child_regs.r15 = 0x100;
-    @>
-    ```
-- **status**: executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall). the status is available within the local variable `status`. `regs` will try to be gathered for inspecting/modifying, however, it is likely this will fail due to the process having exited, so before accessing `regs`, check the local variable `is_regs` which will be set to `1` if `regs` is usable and the process has not exited. the `should_detach` global will be set to the value of `!is_regs` by default, meaning unless overridden, the tracer will detach from the tracee that triggered the status if regs is not accessible
-    ```c
-    <@ status
-        // inspect or modify state, decide whether to exit the tracer based on status
-        if (WIFEXITED(status)) {
-            exit_now = 1;
-            return;
-        }
-        if (is_regs)
-            printf("rip = %p\n", regs.rip);
-        should_detach = 0;
-    @>
-    ```
-
-**Exiting**
-
-The tracer will exit if the global variable `exit_now` is ever set to `1` from within a hook, or if a tracee with pid equal to the global variable `focus_pid` is detached. `focus_pid` is initially the first pid but can be modified within hooks.
-
-**Detaching**
-
-To detach from a tracee, set the global variable `should_detach` to `1` from within a hook. The tracee which triggered the hook will be detached after the hook returns.
-
-**Pausing**
-
-The execution of a tracee can be paused/unpaused by passing its pid to the following functions, accessible within hooks:
+### Address-based
+Executes whenever PC reaches the address, specified by a C expression.
 ```c
-void pid_pause(int pid);
-void pid_unpause(int pid);
+<@ base+0x1234
+    // code to execute each time we hit base+0x1234
+@>
 ```
-The following function returns `1` if the pid is paused and `0` otherwise.
-```c
-int pid_is_paused(int pid);
-```
-Pausing a tracee prevents it from resuming after its next breakpoint until `pid_unpause` is called, but the associated hook will still run. Pausing will not issue an interrupt and thus only takes effect after the next breakpoint. If a hook initiated from pid `A` pauses pid `A`, pid `A` will not continue execution after the hook.
+`base` is a predefined variable representing the executable's base address (useful for PIEs).
 
-**Example**
+### Pre-syscall
+Executes before the entry of a certain syscall, specified by name or number, comma separated list for multiple syscalls.
+```c
+<@ pre-syscall write, read, 96
+    // modify syscall arguments
+@>
+```
+
+### Post-syscall
+Executes after the completion of a certain syscall.
+```c
+<@ post-syscall write, read, 96
+    // inspect or modify return values
+@>
+```
+
+### Fork
+Executes when a tracee triggers a fork, vfork, or clone.
+Three new variables are introduced:
+- **`int child`**
+    - PID of the spawned child, while the usual `pid` variable stores the parent's PID
+- **`int should_trace`**
+    - If set to `0`, the child will be immediately detached from the tracer. Set to `1` by default.
+- **`struct user_regs_struct child_regs`**
+    - Register state of the child, while the usual `regs` variable stores the parent's regsiters. Modifications to both will be applied.
+Caution: If using address breakpoints and you stop tracing the child, hitting those traps in the child will cause a crash as there is no tracer to handle them. This can be fixed by resetting breakpoints on detach, but it's not yet implemented.
+```c
+<@ fork
+    // inspect or modify state, decide whether to trace child
+    if (regs.r15 == 0x42 || child == 69420)
+        should_trace = 0;
+    else
+        child_regs.r15 = 0x100;
+@>
+```
+
+### Status
+Executes when the tracer receives an unhandled status (anything besides a trap from a breakpoint or syscall).
+Two new variables are introduced: 
+- **`int status`** 
+    - Status set by `waitpid`.
+- **`int is_regs`**
+    - Set to `1` if the `regs` variable is usable, `0` otherwise. Any attempt to access `regs` should be prefaced by checking `is_regs`.
+
+`is_regs` is required due to exit statuses being sent after execution state has been destructed. `should_detach` is set to `!is_regs` to help clean up exited tracees, but it can be overridden as usual.
+```c
+<@ status
+    // inspect or modify state, decide whether to exit the tracer based on status
+    if (WIFEXITED(status)) {
+        exit_now = 1;
+        return;
+    }
+    if (is_regs)
+        printf("rip = %p\n", regs.rip);
+    should_detach = 0;
+@>
+```
+
+## Example
 ```c
 // global variables
 int break_cnt;
@@ -161,4 +206,5 @@ During this process, it needs to be able to read maps from procfs to determine
 the programs's base address (since we start at linker code and extracting base from memory would require nontrivial parsing of the stack).
 
 ## TODO
-- Maybe find a better way to differentiate syscall entry/exit and pausing, global pid table can cause memory leaks if processes don't properly detach
+- Eliminate all trap instructions when detaching from a child that is not in an exited state.
+- Add arbitrary shellcode injection, make injection safer by starting at beginning of page containing PC to give most runway.
