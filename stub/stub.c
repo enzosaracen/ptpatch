@@ -138,12 +138,25 @@ void ptrace_setoptions(int pid, long data)
 #define INS_INT3 0xcc
 
 #ifdef HOOK_SYSCALLS
-#define RESUME ptrace_syscall
+	#define RESUME ptrace_syscall
 #else
-#define RESUME ptrace_cont
+	#define RESUME ptrace_cont
 #endif
 
-int cur_pid, focus_pid, exit_now, should_detach;
+#ifdef HOOK_FORKS
+	#define FLAGS_FORK (PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE)
+#else
+	#define FLAGS_FORK 0
+#endif
+
+#ifdef HOOK_SYSCALLS
+	#define FLAGS_SYSCALLS PTRACE_O_TRACESYSGOOD
+#else
+	#define FLAGS_SYSCALLS 0
+#endif
+#define PTRACE_FLAGS (FLAGS_FORK|FLAGS_SYSCALLS)
+
+int cur_pid, focus_pid, exit_now, should_detach, in_sys_entry;
 unsigned long base;
 
 struct Breakpoint {
@@ -324,8 +337,11 @@ void sys_handle(int pid)
 		if (pidtab_lookup(pid, PIDTAB_TOGGLE_ENTRY)) {
 			if (postsys_hooks[nr]) 
 				postsys_hooks[nr](pid, &regs);
-		} else if (presys_hooks[nr])
+		} else if (presys_hooks[nr]) {
+			in_sys_entry = 1;
 			presys_hooks[nr](pid, &regs);
+			in_sys_entry = 0;
+		}
 	}
 	ptrace_setregs(pid, &regs);
 }
@@ -373,6 +389,7 @@ int mem_read(char *addr, char *buf, int n)
 
 long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)
 {
+	ptrace_setoptions(cur_pid, 0);
 	struct user_regs_struct saved_regs, regs;
 	ptrace_getregs(cur_pid, &saved_regs);
 	regs = saved_regs;
@@ -386,24 +403,33 @@ long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a
 	void *rip = (void*)saved_regs.rip;
 	long orig = ptrace_peektext(cur_pid, rip);
 	ptrace_poketext(cur_pid, rip, (orig & ~0xffff)|INS_SYSCALL);
+	ptrace_setregs(cur_pid, &regs);
 	ptrace_singlestep(cur_pid);
+	long ret;
 	int status;
-	#ifdef HOOK_SYSCALLS
-		int skip = 2;
-		while (skip) {
-			waitpid(cur_pid, &status, 0);
-			if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP|0x80)
-				skip--;
-		}
-	#endif
 	for (;;) {
+		/* if we want to restore state for entry syscall hook,
+		 * we need to continue to let it reenter the syscall,
+		 * else the hook will loop. but if we resume and then
+		 * waitpid for that tracee, there is possibility of other
+		 * tracees preempting us. we should probably then use
+		 * a queue to handle statuses
+		 */
 		waitpid(cur_pid, &status, 0);
-		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP)
-			break;
+		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
+			ptrace_getregs(cur_pid, &regs);
+			if ((char*)regs.rip == (char*)rip+2) {
+				ptrace_poketext(cur_pid, rip, orig);
+				ptrace_setregs(cur_pid, &saved_regs);
+				ptrace_setoptions(cur_pid, PTRACE_FLAGS);
+				if (in_sys_entry)
+					RESUME(cur_pid);
+				return regs.rax;
+			}
+		}
+		ptrace_singlestep(cur_pid);
 	}
-	ptrace_poketext(cur_pid, rip, orig);
-	ptrace_setregs(cur_pid, &saved_regs);
-	return 0;
+	err("exception in syscall injection");
 }
 
 int pid_mem_write(int pid, char *addr, char *buf, int n)
@@ -434,8 +460,11 @@ long pid_inject_syscall(int pid, long nr, long a1, long a2, long a3, long a4, lo
 		return -1;
 	int tmp = cur_pid;
 	cur_pid = pid;
+	int tmp2 = in_sys_entry;
+	in_sys_entry = 0;
 	int ret = inject_syscall(nr, a1, a2, a3, a4, a5, a6);
 	cur_pid = tmp;
+	in_sys_entry = tmp2;
 	return ret;
 }
 
@@ -532,15 +561,7 @@ int main(int argc, char **argv, char **envp)
 		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))
 			exit(1);
 	#endif
-
-	int flags = 0;
-	#ifdef HOOK_FORKS
-		flags |= PTRACE_O_TRACEFORK|PTRACE_O_TRACEVFORK|PTRACE_O_TRACECLONE;
-	#endif
-	#ifdef HOOK_SYSCALLS
-		flags |= PTRACE_O_TRACESYSGOOD;
-	#endif
-	ptrace_setoptions(pid, flags);
+	ptrace_setoptions(pid, PTRACE_FLAGS);
 
 	// add breakpoints here
 
@@ -572,7 +593,7 @@ int main(int argc, char **argv, char **envp)
 					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
 					if (fork_handle_wrapper(pid, child)) {
-						ptrace_setoptions(child, flags);
+						ptrace_setoptions(child, PTRACE_FLAGS);
 						pidtab_lookup(child, PIDTAB_RESUME);
 					} else
 						ptrace_detach(child);
