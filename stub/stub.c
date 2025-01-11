@@ -218,6 +218,19 @@ int bkpt_handle(int pid)
 void (*presys_hooks[MAX_SYSNR])(int, void *);
 void (*postsys_hooks[MAX_SYSNR])(int, void *);
 
+#define INIT_QUEUE_SIZE 1024
+struct event_entry {
+	int pid;
+	int status;
+};
+struct event_queue {
+	struct event_entry *data;
+	int head;
+	int tail;
+	int cap;
+	int len;
+} _evq;
+
 #define MAX_PIDTAB 1024
 struct pidtab {
 	int pid;
@@ -235,6 +248,61 @@ enum pidtab_op {
 	PIDTAB_TOGGLE_ENTRY,
 	PIDTAB_RESUME,
 };
+
+int event_queue_empty(void)
+{
+	return _evq.len > 0;
+}
+
+void event_queue_grow(void)
+{
+    int cap = !_evq.cap ? INIT_QUEUE_SIZE : _evq.cap << 1;
+    if (cap <= _evq.cap)
+		err("event queue size overflow");
+    struct event_entry *data = malloc(cap * sizeof(struct event_entry));
+    if (!data)
+		err("event queue out of memory");
+    if (_evq.head < _evq.tail) {
+		for (int i = 0; i < _evq.len; i++)
+			data[i] = _evq.data[_evq.head + i];
+    } else if (_evq.len > 0) {
+        int right = _evq.cap - _evq.head;
+        for (int i = 0; i < right; i++)
+            data[i] = _evq.data[_evq.head + i];
+        for (int j = 0; j < _evq.tail; j++)
+            data[right + j] = _evq.data[j];
+    }
+    free(_evq.data);
+    _evq.data = data;
+    _evq.cap = cap;
+    _evq.head = 0;
+    _evq.tail = _evq.len;
+}
+
+void event_enqueue(int pid, int status)
+{
+	if (_evq.len >= _evq.cap)
+		event_queue_grow();
+    _evq.data[_evq.tail].pid = pid;
+    _evq.data[_evq.tail].status = status;
+    _evq.tail = (_evq.tail + 1) % _evq.cap;
+    _evq.len++;
+}
+
+struct event_entry event_dequeue(void)
+{
+    if (_evq.len == 0)
+        return (struct event_entry){-1, -1};
+    struct event_entry e = _evq.data[_evq.head];
+    _evq.head = (_evq.head + 1) % _evq.cap;
+    _evq.len--;
+    return e;
+}
+
+struct event_entry event_poll_until_pid(int pid)
+{
+
+}
 
 int pidtab_lookup(int pid, enum pidtab_op op)
 {
@@ -572,11 +640,17 @@ int main(int argc, char **argv, char **envp)
 	RESUME(pid);
 	pid_add(pid);
 	while (!exit_now) {
-		cur_pid = waitpid(-1, &status, 0);
-		if (cur_pid == -1)
-			break;
-		if (!pid_exists(cur_pid))
-			continue;
+		if (!event_queue_empty()) {
+			struct event_entry ev = event_dequeue();
+			cur_pid = ev.pid;
+			status = ev.status;
+		} else {
+			cur_pid = waitpid(-1, &status, 0);
+			if (cur_pid == -1)
+				break;
+			if (!pid_exists(cur_pid))
+				continue;
+		}
 		should_detach = 0;
 		if (WIFSTOPPED(status)) {
 			switch(WEXITSTATUS(status)) {
