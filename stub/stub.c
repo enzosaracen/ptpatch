@@ -157,6 +157,7 @@ void ptrace_setoptions(int pid, long data)
 #define PTRACE_FLAGS (FLAGS_FORK|FLAGS_SYSCALLS)
 
 int cur_pid, focus_pid, exit_now, should_detach, in_sys_entry;
+int kill_all_on_exit = 1;
 unsigned long base;
 
 struct Breakpoint {
@@ -174,6 +175,8 @@ struct Breakpoint bkpt_tab[MAX_BKPTS];
 #define MAX_SYSNR 1024
 void (*presys_hooks[MAX_SYSNR])(int, void *);
 void (*postsys_hooks[MAX_SYSNR])(int, void *);
+void (*presys_default)(int, void*);
+void (*postsys_default)(int, void*);
 
 #define MAX_PIDTAB 1024
 struct pidtab {
@@ -401,9 +404,14 @@ void sys_handle(int pid)
 		if (pidtab_lookup(pid, PIDTAB_TOGGLE_ENTRY)) {
 			if (postsys_hooks[nr]) 
 				postsys_hooks[nr](pid, &regs);
-		} else if (presys_hooks[nr]) {
+			else if (postsys_default)
+				postsys_default(pid, &regs);
+		} else {
 			in_sys_entry = 1;
-			presys_hooks[nr](pid, &regs);
+			if (presys_hooks[nr])
+				presys_hooks[nr](pid, &regs);
+			else if (presys_default)
+				presys_default(pid, &regs);
 			in_sys_entry = 0;
 		}
 	}
@@ -696,6 +704,15 @@ int main(int argc, char **argv, char **envp)
 			ptrace_detach(cur_pid);
 		} else
 			pidtab_lookup(cur_pid, PIDTAB_RESUME);
+	}
+	if (kill_all_on_exit) {
+		for (int i = 0; i < MAX_PIDTAB; i++) {
+			struct pidtab *p = &global_pidtab[i];
+			while (p && p->pid) {
+				kill(p->pid, SIGKILL);
+				p = p->next;
+			}
+		}
 	}
 	return 0;
 }

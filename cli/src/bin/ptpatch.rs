@@ -23,6 +23,8 @@ enum Breakpoint {
     Postsys(Vec<String>),
     Fork(),
     Status(),
+    DefaultPresys(),
+    DefaultPostsys(),
 }
 
 struct Patch {
@@ -110,6 +112,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         };
                         init_str.push_str(&format!("\tpostsys_hooks[{}] = hook{};\n", arg, hookcnt));
                     }
+                },
+                Breakpoint::DefaultPresys() => {
+                    hook_sys = true;
+                    init_str.push_str(&format!("\tpresys_default = hook{};\n", hookcnt));
+                },
+                Breakpoint::DefaultPostsys() => {
+                    hook_sys = true;
+                    init_str.push_str(&format!("\tpostsys_default = hook{};\n", hookcnt));
                 },
                 _ => {},
             }
@@ -257,6 +267,17 @@ fn parse_breakpoint(line: &str) -> Result<Breakpoint, Box<dyn Error>> {
             .map(|s| s.trim().to_string())
             .collect::<Vec<String>>();
         return Ok(Breakpoint::Postsys(names));
+    }
+    if line.starts_with("default") {
+        let rest = line
+            .strip_prefix("default")
+            .ok_or("invalid default format")?
+            .trim();
+        match rest {
+            "pre-syscall" => return Ok(Breakpoint::DefaultPresys()),
+            "post-syscall" =>  return Ok(Breakpoint::DefaultPostsys()),
+            _ => return Err("default must be followed by either 'pre-syscall' or 'post-syscall'".into()),
+        }
     }
     if line.starts_with("fork") {
         return Ok(Breakpoint::Fork());

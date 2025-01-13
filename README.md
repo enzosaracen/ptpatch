@@ -67,9 +67,11 @@ Hooks with certain breakpoint types may have access to additional variables whic
 - `int pid`
     - PID of the current tracee.
 - `struct user_regs_struct regs`
-    - Register state of the current tracee, modifications will be applied to the tracee after the hook returns.
+    - Register state of the current tracee, modifications will be applied to the tracee after the hook returns. It should be noted for syscall hooks that the syscall number is in `regs.orig_rax`.
 - `int exit_now`
     - If set to a non-zero value, the tracer will exit immediately after the hook returns.
+- `int kill_all_on_exit`
+    - If set to a non-zero value, the tracer will kill all tracees upon exiting. Set to `1` by default.
 - `int should_detach`
     - If set to a non-zero value, the tracer will detach from the current tracee after the hook returns. `should_detach` is set to `0` by default, with the [exception of status breakpoints.](##status)
 - `int focus_pid`
@@ -133,11 +135,23 @@ Executes before the entry of a certain syscall, specified by name or number, com
     // modify syscall arguments
 @>
 ```
+A default pre-syscall handler can be specified, which will be run for all syscalls without an explicit pre-syscall handler.
+```c
+<@ default pre-syscall
+    // inspect or modify return values
+@>
+```
 
 ### Post-syscall
 Executes after the completion of a certain syscall.
 ```c
 <@ post-syscall write, read, 96
+    // inspect or modify return values
+@>
+```
+A default post-syscall handler can be specified, which will be run for all syscalls without an explicit post-syscall handler.
+```c
+<@ default post-syscall
     // inspect or modify return values
 @>
 ```
