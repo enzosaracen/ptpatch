@@ -106,7 +106,7 @@ The functions below interface memory transfer between tracer and tracee.
 The functions below interface syscall injection into tracees.
 Injected syscalls are executed immediately and will not trigger any hooks.
 Register state will be saved and restored before function return.
-The return value is the syscall return value, and any injection failure will exit the tracer.
+The return value is the syscall return value, and any injection failure will exit the tracer. If injecting a syscall within a pre-syscall hook, the syscall return value will not be accurate (always -EINVAL) due to ptrace limitations.
 As an exception, `pid_inject_syscall` will return `-1` if the passed PID does not correspond to a valid paused tracee.
 This is indistinguishable from a normal syscall return value, so ensure `pid_is_paused(pid) == 1` to guarantee a syscall actually occurred.
 - `long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a6)`

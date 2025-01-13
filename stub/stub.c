@@ -171,65 +171,9 @@ struct Breakpoint {
 int bkpt_cnt;
 struct Breakpoint bkpt_tab[MAX_BKPTS];
 
-int bkpt_add(int pid, void *addr, void (*hook)(int, void *))
-{
-	if (bkpt_cnt >= MAX_BKPTS)
-		return -1;
-	for (int i = 0; i < bkpt_cnt; i++)
-		if (bkpt_tab[i].addr == addr)
-			err("duplicate breakpoint");
-	bkpt_tab[bkpt_cnt].pid = pid;
-	bkpt_tab[bkpt_cnt].addr = addr;
-	bkpt_tab[bkpt_cnt].hook = hook;
-	bkpt_tab[bkpt_cnt].idx = bkpt_cnt;
-	return bkpt_cnt++;
-}
-
-void bkpt_insert(struct Breakpoint *bkpt)
-{
-	bkpt->orig = ptrace_peektext(bkpt->pid, bkpt->addr);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
-}
-
-int bkpt_handle(int pid)
-{
-	struct user_regs_struct regs;
-	ptrace_getregs(pid, &regs);
-	void *rip = (void*)(regs.rip-1);
-	int idx = -1;
-	for (int i = 0; i < bkpt_cnt; i++)
-		if (bkpt_tab[i].addr == rip)
-			idx = i;
-	if (idx < 0)
-		return -1;
-	struct Breakpoint *bkpt = &bkpt_tab[idx];
-	ptrace_poketext(pid, rip, bkpt->orig);
-	regs.rip -= 1;
-	if (bkpt_tab[idx].hook)
-		bkpt_tab[idx].hook(pid, &regs);
-	ptrace_setregs(pid, &regs);
-	ptrace_singlestep(pid);
-	waitpid(pid, 0, 0);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
-	return 0;
-}
-
 #define MAX_SYSNR 1024
 void (*presys_hooks[MAX_SYSNR])(int, void *);
 void (*postsys_hooks[MAX_SYSNR])(int, void *);
-
-#define INIT_QUEUE_SIZE 1024
-struct event_entry {
-	int pid;
-	int status;
-};
-struct event_queue {
-	struct event_entry *data;
-	int head;
-	int tail;
-	int cap;
-	int len;
-} _evq;
 
 #define MAX_PIDTAB 1024
 struct pidtab {
@@ -248,6 +192,19 @@ enum pidtab_op {
 	PIDTAB_TOGGLE_ENTRY,
 	PIDTAB_RESUME,
 };
+
+/*#define INIT_QUEUE_SIZE 1024
+struct event_entry {
+	int pid;
+	int status;
+};
+struct event_queue {
+	struct event_entry *data;
+	int head;
+	int tail;
+	int cap;
+	int len;
+} _evq;
 
 int event_queue_empty(void)
 {
@@ -298,10 +255,49 @@ struct event_entry event_dequeue(void)
     _evq.len--;
     return e;
 }
+*/
 
-struct event_entry event_poll_until_pid(int pid)
+int bkpt_add(int pid, void *addr, void (*hook)(int, void *))
 {
+	if (bkpt_cnt >= MAX_BKPTS)
+		return -1;
+	for (int i = 0; i < bkpt_cnt; i++)
+		if (bkpt_tab[i].addr == addr)
+			err("duplicate breakpoint");
+	bkpt_tab[bkpt_cnt].pid = pid;
+	bkpt_tab[bkpt_cnt].addr = addr;
+	bkpt_tab[bkpt_cnt].hook = hook;
+	bkpt_tab[bkpt_cnt].idx = bkpt_cnt;
+	return bkpt_cnt++;
+}
 
+void bkpt_insert(struct Breakpoint *bkpt)
+{
+	bkpt->orig = ptrace_peektext(bkpt->pid, bkpt->addr);
+	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
+}
+
+int bkpt_handle(int pid)
+{
+	struct user_regs_struct regs;
+	ptrace_getregs(pid, &regs);
+	void *rip = (void*)(regs.rip-1);
+	int idx = -1;
+	for (int i = 0; i < bkpt_cnt; i++)
+		if (bkpt_tab[i].addr == rip)
+			idx = i;
+	if (idx < 0)
+		return -1;
+	struct Breakpoint *bkpt = &bkpt_tab[idx];
+	ptrace_poketext(pid, rip, bkpt->orig);
+	regs.rip -= 1;
+	if (bkpt_tab[idx].hook)
+		bkpt_tab[idx].hook(pid, &regs);
+	ptrace_setregs(pid, &regs);
+	ptrace_singlestep(pid);
+	waitpid(pid, 0, 0);
+	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
+	return 0;
 }
 
 int pidtab_lookup(int pid, enum pidtab_op op)
@@ -472,31 +468,29 @@ long inject_syscall(long nr, long a1, long a2, long a3, long a4, long a5, long a
 	long orig = ptrace_peektext(cur_pid, rip);
 	ptrace_poketext(cur_pid, rip, (orig & ~0xffff)|INS_SYSCALL);
 	ptrace_setregs(cur_pid, &regs);
-	ptrace_singlestep(cur_pid);
-	long ret;
 	int status;
-	for (;;) {
-		/* if we want to restore state for entry syscall hook,
-		 * we need to continue to let it reenter the syscall,
-		 * else the hook will loop. but if we resume and then
-		 * waitpid for that tracee, there is possibility of other
-		 * tracees preempting us. we should probably then use
-		 * a queue to handle statuses
-		 */
+	ptrace_syscall(cur_pid);
+	waitpid(cur_pid, &status, 0);
+	if (!WIFSTOPPED(status) || WEXITSTATUS(status) != SIGTRAP)
+		goto error;
+	ptrace_syscall(cur_pid);
+	waitpid(cur_pid, &status, 0);
+	if (!WIFSTOPPED(status) || WEXITSTATUS(status) != SIGTRAP)
+		goto error;
+	ptrace_getregs(cur_pid, &regs);
+	if ((char*)regs.rip != (char*)rip+2)
+		goto error;
+	ptrace_poketext(cur_pid, rip, orig);
+	ptrace_setregs(cur_pid, &saved_regs);
+	ptrace_setoptions(cur_pid, PTRACE_FLAGS);
+	/*if (in_sys_entry) {
+		RESUME(cur_pid);
 		waitpid(cur_pid, &status, 0);
-		if (WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP) {
-			ptrace_getregs(cur_pid, &regs);
-			if ((char*)regs.rip == (char*)rip+2) {
-				ptrace_poketext(cur_pid, rip, orig);
-				ptrace_setregs(cur_pid, &saved_regs);
-				ptrace_setoptions(cur_pid, PTRACE_FLAGS);
-				if (in_sys_entry)
-					RESUME(cur_pid);
-				return regs.rax;
-			}
-		}
-		ptrace_singlestep(cur_pid);
-	}
+		if (WEXITSTATUS(status) != SIGTRAP|0x80)
+			goto error;
+	}*/
+	return regs.rax;
+error:
 	err("exception in syscall injection");
 }
 
@@ -640,7 +634,7 @@ int main(int argc, char **argv, char **envp)
 	RESUME(pid);
 	pid_add(pid);
 	while (!exit_now) {
-		if (!event_queue_empty()) {
+		/*if (!event_queue_empty()) {
 			struct event_entry ev = event_dequeue();
 			cur_pid = ev.pid;
 			status = ev.status;
@@ -650,7 +644,12 @@ int main(int argc, char **argv, char **envp)
 				break;
 			if (!pid_exists(cur_pid))
 				continue;
-		}
+		}*/
+		cur_pid = waitpid(-1, &status, 0);
+		if (cur_pid == -1)
+			break;
+		if (!pid_exists(cur_pid))
+			continue;
 		should_detach = 0;
 		if (WIFSTOPPED(status)) {
 			switch(WEXITSTATUS(status)) {
