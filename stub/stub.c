@@ -62,9 +62,11 @@ enum __ptrace_request
 	PTRACE_GET_RSEQ_CONFIGURATION = 0x420f
 };
 
+void do_exit(int);
+
 #define err(s) { \
 	printf("%s:%d: error: %s\n",  __FILE__, __LINE__, s); \
-	exit(1); \
+	do_exit(1); \
 }
 
 long ptrace(enum __ptrace_request request, int pid, void *addr, void *data)
@@ -259,6 +261,20 @@ struct event_entry event_dequeue(void)
     return e;
 }
 */
+
+void do_exit(int ret)
+{
+	if (kill_all_on_exit) {
+		for (int i = 0; i < MAX_PIDTAB; i++) {
+			struct pidtab *p = &global_pidtab[i];
+			while (p && p->pid) {
+				kill(p->pid, SIGKILL);
+				p = p->next;
+			}
+		}
+	}
+	exit(ret);
+}
 
 int bkpt_add(int pid, void *addr, void (*hook)(int, void *))
 {
