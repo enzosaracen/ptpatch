@@ -70,12 +70,12 @@ Hooks with certain breakpoint types may have access to additional variables whic
     - Register state of the current tracee, modifications will be applied to the tracee after the hook returns. It should be noted for syscall hooks that the syscall number is in `regs.orig_rax`.
 - `int exit_now`
     - If set to a non-zero value, the tracer will exit immediately after the hook returns.
-- `int kill_all_on_exit`
-    - If set to a non-zero value, the tracer will kill all tracees upon exiting. Set to `1` by default.
 - `int should_detach`
     - If set to a non-zero value, the tracer will detach from the current tracee after the hook returns. `should_detach` is set to `0` by default, with the [exception of status breakpoints.](##status)
 - `int focus_pid`
     - The tracer will exit if a tracee with PID of `focus_pid` is detached. `focus_pid` is set to the first tracee's PID by default. This is a global variable that is persistent across hooks.
+- `int kill_all_on_exit`
+    - If set to a non-zero value, the tracer will kill all tracees upon exiting. Set to `1` by default. This is a global variable that is persistent across hooks.
 
 ### Functions
 #### Pausing
