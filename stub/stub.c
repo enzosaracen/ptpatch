@@ -641,15 +641,38 @@ int main(int argc, char **argv, char **envp)
 			procbuf[19] = 'e';
 			procbuf[20] = 0;
 			char path[0x100] = {};
-			int pathlen = readlink(procbuf, path, sizeof(path));
+			int pathlen = syscall(__NR_readlink, procbuf, path, sizeof(path));
 			if (pathlen < 0 || pathlen >= sizeof(path))
 				err("failed to readlink /proc/pid/exe");
-				
-			char buf[13];
-			read(fd, buf, 12);
-			close(fd);
-			buf[12] = 0;
-			base = strtoul(buf, 0, 0x10);
+			char buf[0x200];
+			int amt;
+			base = -1;
+			while ((amt = read(mapsfd, buf, sizeof(buf))) > 0) {
+				int last = 0;
+				for (int i = 0; i < amt; i++) {
+					if (buf[i] == '\n') {
+						int _last = last;
+						last = i;
+						if (i-1-pathlen < -1)
+							continue;
+						int pos = pathlen-1;
+						for (int j = i-1; j > i-1-pathlen; j--)
+							if (buf[j] != path[pos--])
+								goto cont;
+						*(buf+_last+12) = 0;
+						base = strtoul(buf+_last, 0, 0x10);
+						goto done;
+					}
+				cont:
+					;
+				}
+				if (!last)
+					break;
+				memmove(buf, buf+last+1, sizeof(buf)-last);
+			}
+		done:
+			if (base == -1)
+				err("failed to parse /proc/pid/maps");
 			entry += base;
 		}
 		long orig = ptrace_peektext(pid, (void*)entry);
