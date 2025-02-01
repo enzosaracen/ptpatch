@@ -623,6 +623,7 @@ int main(int argc, char **argv, char **envp)
 			exit(1);
 		}
 	#endif
+	pid_add(pid);
 
 	int status;
 	waitpid(pid, 0, 0);
@@ -645,7 +646,7 @@ int main(int argc, char **argv, char **envp)
 		ptrace_cont(pid);
 		waitpid(pid, &status, 0);
 		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))
-			exit(1);
+			err("did not stop on entry");
 	#endif
 	ptrace_setoptions(pid, PTRACE_FLAGS);
 
@@ -656,7 +657,6 @@ int main(int argc, char **argv, char **envp)
 
 	focus_pid = pid;
 	RESUME(pid);
-	pid_add(pid);
 	while (!exit_now) {
 		/*if (!event_queue_empty()) {
 			struct event_entry ev = event_dequeue();
