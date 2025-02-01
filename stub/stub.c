@@ -633,7 +633,18 @@ int main(int argc, char **argv, char **envp)
 			int i = 15;
 			for(int v = pid; v > 0; v /= 10)
 				procbuf[i--] = '0' + v%10;
-			int fd = open(procbuf, O_RDONLY);
+			int mapsfd = open(procbuf, O_RDONLY);
+			if (mapsfd < 0)
+				err("failed to open /proc/pid/maps")
+			procbuf[17] = 'e';
+			procbuf[18] = 'x';
+			procbuf[19] = 'e';
+			procbuf[20] = 0;
+			char path[0x100] = {};
+			int pathlen = readlink(procbuf, path, sizeof(path));
+			if (pathlen < 0 || pathlen >= sizeof(path))
+				err("failed to readlink /proc/pid/exe");
+				
 			char buf[13];
 			read(fd, buf, 12);
 			close(fd);
