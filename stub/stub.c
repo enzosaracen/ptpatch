@@ -651,7 +651,7 @@ int main(int argc, char **argv, char **envp)
 				int last = 0;
 				for (int i = 0; i < amt; i++) {
 					if (buf[i] == '\n') {
-						int _last = last;
+						char *nump = buf+last;
 						last = i;
 						if (i-1-pathlen < -1)
 							continue;
@@ -659,8 +659,7 @@ int main(int argc, char **argv, char **envp)
 						for (int j = i-1; j > i-1-pathlen; j--)
 							if (buf[j] != path[pos--])
 								goto cont;
-						*(buf+_last+12) = 0;
-						base = strtoul(buf+_last, 0, 0x10);
+						base = strtoul(nump, 0, 0x10);
 						goto done;
 					}
 				cont:
