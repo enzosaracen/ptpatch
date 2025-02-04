@@ -625,6 +625,7 @@ int main(int argc, char **argv, char **envp)
 	#endif
 	pid_add(pid);
 
+	struct user_regs_struct regs;
 	int status;
 	waitpid(pid, 0, 0);
 	#ifdef INIT_AFTER_ENTRY
@@ -678,8 +679,12 @@ int main(int argc, char **argv, char **envp)
 		ptrace_poketext(pid, (void*)entry, (orig & ~0xff)|INS_INT3);
 		ptrace_cont(pid);
 		waitpid(pid, &status, 0);
-		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP))
+		ptrace_getregs(pid, &regs);
+		if (!(WIFSTOPPED(status) && WEXITSTATUS(status) == SIGTRAP && regs.rip == entry+1))
 			err("did not stop on entry");
+		ptrace_poketext(pid, (void*)entry, orig);
+		regs.rip = entry;
+		ptrace_setregs(pid, &regs);
 	#endif
 	ptrace_setoptions(pid, PTRACE_FLAGS);
 
@@ -720,7 +725,6 @@ int main(int argc, char **argv, char **envp)
 					if (child == -1)
 						err("geteventmsg");
 					pid_add(child);
-					struct user_regs_struct regs;
 					while (ptrace(PTRACE_GETREGS, child, 0, &regs) < 0);
 					if (fork_handle_wrapper(pid, child)) {
 						ptrace_setoptions(child, PTRACE_FLAGS);
@@ -743,7 +747,6 @@ int main(int argc, char **argv, char **envp)
 			#ifdef STATUS_HANDLER
 				status_handle_wrapper(cur_pid, status);
 			#else
-				struct user_regs_struct regs;
 				should_detach = WIFEXITED(status) || ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0;
 			#endif
 		}
