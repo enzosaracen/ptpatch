@@ -567,11 +567,8 @@ int fork_handle_wrapper(int pid, int child)
 {
 	int should_trace = 1;
 	struct user_regs_struct regs, child_regs;
-	puts("1 hmm??");
 	ptrace_getregs(pid, &regs);
-	puts("2 hmm??");
 	ptrace_getregs(child, &child_regs);
-	puts("3 hmm??");
 	fork_handle(pid, child, &should_trace, &regs, &child_regs);
 	ptrace_setregs(pid, &regs);
 	ptrace_setregs(child, &child_regs);
