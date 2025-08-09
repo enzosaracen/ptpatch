@@ -90,8 +90,10 @@ int ptrace_testtext(int pid, void *addr)
 
 void ptrace_poketext(int pid, void *addr, long data)
 {
-	if (ptrace(PTRACE_POKETEXT, pid, addr, (void*)data) < 0)
+	int ret = ptrace(PTRACE_POKETEXT, pid, addr, (void*)data);
+	if (ret < 0) {
 		err("poketext");
+	}
 }
 
 void ptrace_getregs(int pid, struct user_regs_struct *regs)
@@ -315,7 +317,7 @@ int bkpt_handle(int pid)
 	ptrace_setregs(pid, &regs);
 	ptrace_singlestep(pid);
 	waitpid(pid, 0, 0);
-	ptrace_poketext(bkpt->pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
+	ptrace_poketext(pid, bkpt->addr, (bkpt->orig & ~0xff)|INS_INT3);
 	return 0;
 }
 
